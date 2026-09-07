@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Production build outputs
+dist/
+frontend/dist/
+build/
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+artifacts/
+
+# Environment variables
+.env
+*.env.local
+
+# Vercel
+.vercel/
+frontend/.vercel/
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,18 @@
+environment: .env
+
+paths:
+  contracts: contracts
+  artifacts: artifacts
+
+networks:
+  default: studionet
+  studionet:
+    id: 61999
+    url: https://studio.genlayer.com/api
+    chain_type: studionet
+    leader_only: false
+  localnet:
+    id: 61999
+    url: http://127.0.0.1:4000/api
+    chain_type: localnet
+    leader_only: false
