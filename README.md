@@ -2,6 +2,12 @@
 
 > **Autonomous Multi-Source Fact-Checking Protocol & AI Jury Court on GenLayer Studionet**
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?style=for-the-badge&logo=vercel)](https://frontend-tan-eight-91.vercel.app)
+[![Network](https://img.shields.io/badge/Network-GenLayer%20Studionet%20(61999)-cyan?style=for-the-badge)](https://studio.genlayer.com)
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?style=for-the-badge&logo=github)](https://github.com/tuannguyenvan95/truthBounty)
+
+**Live dApp URL**: [https://frontend-tan-eight-91.vercel.app](https://frontend-tan-eight-91.vercel.app)
+
 TruthBounty is a decentralized, on-chain fact-checking and news attribution court built for the **GenLayer** intelligent blockchain. It eliminates fake news, market manipulation rumors, and unverified breaking claims by combining live multi-source web cross-referencing with decentralized subjective AI jury consensus.
 
 ---
