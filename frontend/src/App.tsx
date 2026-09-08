@@ -13,6 +13,7 @@ import {
   setSavedContractAddress,
   getGenLayerClient,
   switchToStudionet,
+  getEthereumProvider,
 } from './config/genlayer';
 import { formatEther, parseEther } from 'viem';
 import type { Address } from 'viem';
@@ -65,18 +66,18 @@ export function App() {
 
   // Connect MetaMask
   const connectWallet = async () => {
-    const ethereum = (window as any).ethereum;
-    if (!ethereum) {
-      showToast('error', 'MetaMask is required to interact with TruthBounty.');
+    const provider = getEthereumProvider();
+    if (!provider) {
+      showToast('error', 'No Web3 wallet extension found. Please install MetaMask to use TruthBounty.');
       return;
     }
 
     try {
       setIsConnecting(true);
-      const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+      const accounts = await provider.request({ method: 'eth_requestAccounts' });
       if (accounts && accounts.length > 0) {
         setAccount(accounts[0]);
-        const currentChainHex = await ethereum.request({ method: 'eth_chainId' });
+        const currentChainHex = await provider.request({ method: 'eth_chainId' });
         const currentId = parseInt(currentChainHex, 16);
         setChainId(currentId);
 
@@ -84,9 +85,13 @@ export function App() {
           try {
             await switchToStudionet();
             setChainId(STUDIONET_CHAIN_ID);
-          } catch {
-            showToast('info', 'Please switch your MetaMask network to GenLayer Studionet.');
+            showToast('success', 'Connected to GenLayer Studionet (61999)!');
+          } catch (switchErr: any) {
+            console.warn('Network switch issue:', switchErr);
+            showToast('info', 'Connected! Please switch your wallet to GenLayer Studionet.');
           }
+        } else {
+          showToast('success', 'Connected to GenLayer Studionet!');
         }
       }
     } catch (err: any) {
@@ -104,10 +109,10 @@ export function App() {
 
   // Fetch balance
   const updateBalance = useCallback(async (userAddr: string) => {
-    const ethereum = (window as any).ethereum;
-    if (!ethereum) return;
+    const provider = getEthereumProvider();
+    if (!provider) return;
     try {
-      const balHex = await ethereum.request({
+      const balHex = await provider.request({
         method: 'eth_getBalance',
         params: [userAddr, 'latest'],
       });
@@ -190,12 +195,12 @@ export function App() {
 
   // Initial load and listeners
   useEffect(() => {
-    const ethereum = (window as any).ethereum;
-    if (ethereum) {
-      ethereum.request({ method: 'eth_accounts' }).then((accounts: string[]) => {
+    const provider = getEthereumProvider();
+    if (provider) {
+      provider.request({ method: 'eth_accounts' }).then((accounts: string[]) => {
         if (accounts && accounts.length > 0) {
           setAccount(accounts[0]);
-          ethereum.request({ method: 'eth_chainId' }).then((hexId: string) => {
+          provider.request({ method: 'eth_chainId' }).then((hexId: string) => {
             setChainId(parseInt(hexId, 16));
           });
         }
@@ -213,12 +218,16 @@ export function App() {
         setChainId(parseInt(hexId, 16));
       };
 
-      ethereum.on('accountsChanged', handleAccountsChanged);
-      ethereum.on('chainChanged', handleChainChanged);
+      if (provider.on) {
+        provider.on('accountsChanged', handleAccountsChanged);
+        provider.on('chainChanged', handleChainChanged);
+      }
 
       return () => {
-        ethereum.removeListener('accountsChanged', handleAccountsChanged);
-        ethereum.removeListener('chainChanged', handleChainChanged);
+        if (provider.removeListener) {
+          provider.removeListener('accountsChanged', handleAccountsChanged);
+          provider.removeListener('chainChanged', handleChainChanged);
+        }
       };
     }
   }, []);
