@@ -16,6 +16,13 @@ import {
   switchToStudionet,
   getEthereumProvider,
   formatGenAmount,
+  isBountyOpen,
+  isBountyAwaitingPayout,
+  isBountyResolvedTrue,
+  isBountyResolvedFalse,
+  isBountyUnverified,
+  isBountyCancelled,
+  isBountyDisputed,
 } from './config/genlayer';
 import { formatEther, parseEther, getAddress } from 'viem';
 import type { Address } from 'viem';
@@ -154,6 +161,7 @@ export function App() {
   const [activeAdjudicatingId, setActiveAdjudicatingId] = useState<string | null>(null);
   const [activeCancellingId, setActiveCancellingId] = useState<string | null>(null);
   const [activeChallengingId, setActiveChallengingId] = useState<string | null>(null);
+  const [activeSettlingId, setActiveSettlingId] = useState<string | null>(null);
   const [selectedAuditBounty, setSelectedAuditBounty] = useState<BountyItem | null>(null);
 
   // Filter & Search
@@ -257,78 +265,78 @@ export function App() {
       if (!isSilent) setIsRefreshing(true);
       const client = getGenLayerClient();
 
-      // 1. Fetch platform stats and bounty count in parallel
-      const [rawStatsRes, countRes] = await Promise.allSettled([
-        client.readContract({
+      // 1. Fetch platform stats
+      try {
+        const rawStatsRes = await client.readContract({
           address: contractAddress as Address,
           functionName: 'get_stats',
           args: [],
-        }),
-        client.readContract({
+        });
+        if (typeof rawStatsRes === 'string') {
+          setStats(JSON.parse(rawStatsRes));
+        }
+      } catch {}
+
+      let fetchedBounties: BountyItem[] = [];
+
+      // 2. Primary Fast-Sync: Try single-call get_all_bounties (Institutional v0.2.18 Standard)
+      try {
+        const rawAll = await client.readContract({
           address: contractAddress as Address,
-          functionName: 'get_bounty_count',
+          functionName: 'get_all_bounties',
           args: [],
-        }),
-      ]);
-
-      if (rawStatsRes.status === 'fulfilled' && typeof rawStatsRes.value === 'string') {
-        try {
-          setStats(JSON.parse(rawStatsRes.value));
-        } catch {}
-      }
-
-      // If count retrieval failed due to transient network glitch, do NOT wipe out existing bounties!
-      if (countRes.status !== 'fulfilled') {
-        return;
-      }
-
-      const count = Number(countRes.value);
-      if (count === 0) {
-        setBounties([]);
-        setCachedBounties(contractAddress, []);
-        return;
-      }
-
-      // 2. Fetch all bounty IDs (with guaranteed fallback to truth-{idx+1} if RPC drops)
-      const idPromises = Array.from({ length: count }, async (_, idx) => {
-        try {
-          const id = await client.readContract({
-            address: contractAddress as Address,
-            functionName: 'get_bounty_id_by_index',
-            args: [idx],
-          });
-          if (typeof id === 'string' && id) return id;
-        } catch {}
-        return `truth-${idx + 1}`;
-      });
-      const validIds = await Promise.all(idPromises);
-
-      // 3. Fetch each bounty details with retry for maximum resilience
-      const bountyPromises = validIds.map(async (id) => {
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            const raw = await client.readContract({
-              address: contractAddress as Address,
-              functionName: 'get_bounty',
-              args: [id],
-            });
-            if (typeof raw === 'string') {
-              return JSON.parse(raw) as BountyItem;
-            }
-          } catch (itemErr) {
-            if (attempt === 0) {
-              await new Promise((r) => setTimeout(r, 200));
-            } else if (!isSilent) {
-              console.warn(`Failed to fetch bounty ${id}:`, itemErr);
-            }
+        });
+        if (typeof rawAll === 'string') {
+          const parsed = JSON.parse(rawAll);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            fetchedBounties = parsed as BountyItem[];
           }
         }
-        return null;
-      });
+      } catch (allErr) {
+        // Older contract fallback
+      }
 
-      const fetchedBounties = (await Promise.all(bountyPromises)).filter(
-        (item): item is BountyItem => item !== null
-      );
+      // 3. Fallback for older contracts without get_all_bounties
+      if (fetchedBounties.length === 0) {
+        try {
+          const countRes = await client.readContract({
+            address: contractAddress as Address,
+            functionName: 'get_bounty_count',
+            args: [],
+          });
+          const count = Number(countRes);
+          if (count > 0) {
+            const idPromises = Array.from({ length: count }, async (_, idx) => {
+              try {
+                const id = await client.readContract({
+                  address: contractAddress as Address,
+                  functionName: 'get_bounty_id_by_index',
+                  args: [idx],
+                });
+                if (typeof id === 'string' && id) return id;
+              } catch {}
+              return `truth-${idx + 1}`;
+            });
+            const validIds = await Promise.all(idPromises);
+            const bountyPromises = validIds.map(async (id) => {
+              try {
+                const raw = await client.readContract({
+                  address: contractAddress as Address,
+                  functionName: 'get_bounty',
+                  args: [id],
+                });
+                if (typeof raw === 'string') {
+                  return JSON.parse(raw) as BountyItem;
+                }
+              } catch {}
+              return null;
+            });
+            fetchedBounties = (await Promise.all(bountyPromises)).filter(
+              (item): item is BountyItem => item !== null
+            );
+          }
+        } catch {}
+      }
 
       // Safe Map-based merge: never drop previously loaded bounties
       if (fetchedBounties.length > 0) {
@@ -457,6 +465,8 @@ export function App() {
     sourceUrlA: string;
     sourceUrlB: string;
     amountGen: string;
+    hashA?: string;
+    hashB?: string;
   }) => {
     if (!account) throw new Error('MetaMask not connected.');
     if (!contractAddress || contractAddress === '0x0000000000000000000000000000000000000000') {
@@ -473,13 +483,25 @@ export function App() {
       const userChecksummed = getAddress(account);
       const contractChecksummed = getAddress(contractAddress);
 
-      const txHash = await client.writeContract({
-        address: contractChecksummed,
-        functionName: 'create_bounty',
-        args: [data.claim, data.sourceUrlA, data.sourceUrlB],
-        value: valueWei,
-        account: { address: userChecksummed } as any,
-      });
+      let txHash: any;
+      try {
+        txHash = await client.writeContract({
+          address: contractChecksummed,
+          functionName: 'create_bounty',
+          args: [data.claim, data.sourceUrlA, data.sourceUrlB, data.hashA || '', data.hashB || ''],
+          value: valueWei,
+          account: { address: userChecksummed } as any,
+        });
+      } catch (callErr) {
+        // Fallback for legacy 3-param create_bounty
+        txHash = await client.writeContract({
+          address: contractChecksummed,
+          functionName: 'create_bounty',
+          args: [data.claim, data.sourceUrlA, data.sourceUrlB],
+          value: valueWei,
+          account: { address: userChecksummed } as any,
+        });
+      }
 
       showToast('info', `Transaction submitted (${txHash.slice(0, 10)}...). Waiting for finality...`);
 
@@ -591,68 +613,105 @@ export function App() {
     }
   };
 
-  // Challenge / Appeal Handler
-  const handleChallenge = async (bountyId: string) => {
+  // Finalize Settlement Handler (called after 24h cooling-off period)
+  const handleFinalizeSettlement = async (bountyId: string) => {
     if (!account) {
-      showToast('error', 'Connect MetaMask to file an appeal challenge.');
+      showToast('error', 'Connect MetaMask to finalize settlement.');
       return;
     }
 
     try {
-      setActiveChallengingId(bountyId);
+      setActiveSettlingId(bountyId);
+      showToast('info', `Finalizing settlement on GenLayer for #${bountyId}...`);
 
       const client = getGenLayerClient();
       const userChecksummed = getAddress(account);
       const contractChecksummed = getAddress(contractAddress);
 
-      // Check if current contract supports challenge_verdict BEFORE prompting
-      try {
-        const schema = await client.getContractSchema(contractChecksummed);
-        if (!schema?.methods?.challenge_verdict) {
-          showToast('error', 'Hợp đồng này chưa hỗ trợ tính năng Kháng cáo on-chain.');
-          setActiveChallengingId(null);
-          return;
-        }
-      } catch (e) {
-        console.warn('Could not read contract schema for appeal:', e);
-      }
-
-      const appealPrompt = window.prompt(
-        'Enter reason for appealing this verdict to the GenLayer High Court:',
-        'Dispute verdict: external web sources were ambiguous or contradictory.'
-      );
-      if (!appealPrompt || !appealPrompt.trim()) {
-        setActiveChallengingId(null);
-        return;
-      }
-
-      const appealBondWei = 10000000000000000n; // 0.01 GEN appeal bond
-      showToast('info', `Filing on-chain appeal with ${formatGenAmount(appealBondWei)} GEN appeal bond...`);
-
       const txHash = await client.writeContract({
         address: contractChecksummed,
-        functionName: 'challenge_verdict',
-        args: [bountyId, appealPrompt.trim()],
-        value: appealBondWei,
+        functionName: 'finalize_settlement',
+        args: [bountyId],
+        value: 0n,
         account: { address: userChecksummed } as any,
       });
 
-      showToast('info', `Appeal transaction submitted (${txHash.slice(0, 10)}...). Escalating case...`);
-
+      showToast('info', `Settlement submitted (${txHash.slice(0, 10)}...). Disbursing funds...`);
       await client.waitForTransactionReceipt({ hash: txHash as any });
       await new Promise((resolve) => setTimeout(resolve, 3000));
 
-      showToast('success', `Appeal recorded on-chain! Case escalated to High Court.`);
+      showToast('success', `Settlement finalized! Bounty rewards disbursed & bonds refunded.`);
       localStorage.setItem('truthbounty_sync_ping', Date.now().toString());
       await fetchContractData();
       if (account) updateBalance(account);
     } catch (err: any) {
-      console.error('Challenge failed:', err);
-      showToast('error', err?.message || 'Failed to file appeal.');
+      console.error('Settlement failed:', err);
+      showToast('error', err?.message || 'Failed to finalize settlement.');
+    } finally {
+      setActiveSettlingId(null);
+    }
+  };
+
+  // Raise Dispute / Challenge Handler (during 24h cooling-off window)
+  const handleRaiseDispute = async (bountyId: string, customReason?: string) => {
+    if (!account) {
+      showToast('error', 'Connect MetaMask to file an on-chain dispute.');
+      return;
+    }
+
+    let disputeReason = customReason;
+    if (!disputeReason) {
+      const promptRes = window.prompt(
+        'Enter reason for disputing this adjudication (freezes payout into DISPUTED state):',
+        'Contradiction in evidence or web rendering discrepancy identified.'
+      );
+      if (!promptRes || !promptRes.trim()) {
+        return;
+      }
+      disputeReason = promptRes.trim();
+    }
+
+    try {
+      setActiveChallengingId(bountyId);
+      showToast('info', `Filing on-chain dispute for #${bountyId}...`);
+
+      const client = getGenLayerClient();
+      const userChecksummed = getAddress(account);
+      const contractChecksummed = getAddress(contractAddress);
+
+      let targetFunction = 'raise_dispute';
+      try {
+        const schema = await client.getContractSchema(contractChecksummed);
+        if (!schema?.methods?.raise_dispute && schema?.methods?.challenge_verdict) {
+          targetFunction = 'challenge_verdict';
+        }
+      } catch {}
+
+      const txHash = await client.writeContract({
+        address: contractChecksummed,
+        functionName: targetFunction,
+        args: [bountyId, disputeReason],
+        value: 0n,
+        account: { address: userChecksummed } as any,
+      });
+
+      showToast('info', `Dispute recorded (${txHash.slice(0, 10)}...). Freezing escrow...`);
+      await client.waitForTransactionReceipt({ hash: txHash as any });
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      showToast('success', `Dispute filed! Bounty status frozen under DISPUTED.`);
+      localStorage.setItem('truthbounty_sync_ping', Date.now().toString());
+      await fetchContractData();
+      if (account) updateBalance(account);
+    } catch (err: any) {
+      console.error('Dispute failed:', err);
+      showToast('error', err?.message || 'Failed to raise dispute.');
     } finally {
       setActiveChallengingId(null);
     }
   };
+
+  const handleChallenge = handleRaiseDispute;
 
   // Cancel Handler
   const handleCancel = async (bountyId: string) => {
@@ -723,7 +782,7 @@ export function App() {
 
   // Role Counts
   const countAvailable = React.useMemo(() => {
-    return bounties.filter((b) => b.status === 0 && (!account || b.creator.toLowerCase() !== account.toLowerCase())).length;
+    return bounties.filter((b) => isBountyOpen(b.status) && (!account || b.creator.toLowerCase() !== account.toLowerCase())).length;
   }, [bounties, account]);
 
   const countMyCreated = React.useMemo(() => {
@@ -738,12 +797,26 @@ export function App() {
       b.source_url_a.toLowerCase().includes(searchQuery.toLowerCase()) ||
       b.source_url_b.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesStatus =
-      statusFilter === 'all' || b.status.toString() === statusFilter;
+    let matchesStatus = true;
+    if (statusFilter === 'open') {
+      matchesStatus = isBountyOpen(b.status);
+    } else if (statusFilter === 'awaiting_payout') {
+      matchesStatus = isBountyAwaitingPayout(b.status);
+    } else if (statusFilter === 'true') {
+      matchesStatus = isBountyResolvedTrue(b.status);
+    } else if (statusFilter === 'false') {
+      matchesStatus = isBountyResolvedFalse(b.status);
+    } else if (statusFilter === 'unverified') {
+      matchesStatus = isBountyUnverified(b.status);
+    } else if (statusFilter === 'disputed') {
+      matchesStatus = isBountyDisputed(b.status);
+    } else if (statusFilter !== 'all') {
+      matchesStatus = b.status.toString() === statusFilter;
+    }
 
     let matchesRole = true;
     if (roleFilter === 'available') {
-      matchesRole = b.status === 0 && (!account || b.creator.toLowerCase() !== account.toLowerCase());
+      matchesRole = isBountyOpen(b.status) && (!account || b.creator.toLowerCase() !== account.toLowerCase());
     } else if (roleFilter === 'my_created') {
       matchesRole = Boolean(account && b.creator.toLowerCase() === account.toLowerCase());
     }
@@ -865,14 +938,16 @@ export function App() {
               </div>
 
               {/* Status Filter */}
-              <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
+              <div className="flex flex-wrap items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
                 <Filter className="h-3.5 w-3.5 text-slate-400 ml-2 mr-1" />
                 {[
                   { label: 'All', val: 'all' },
-                  { label: 'Open', val: '0' },
-                  { label: 'True', val: '1' },
-                  { label: 'False', val: '2' },
-                  { label: 'Unverified', val: '3' },
+                  { label: 'Open', val: 'open' },
+                  { label: 'Cooling-off', val: 'awaiting_payout' },
+                  { label: 'True', val: 'true' },
+                  { label: 'False', val: 'false' },
+                  { label: 'Unverified', val: 'unverified' },
+                  { label: 'Disputed', val: 'disputed' },
                 ].map((item) => (
                   <button
                     key={item.val}
@@ -948,11 +1023,14 @@ export function App() {
                   currentAccount={account}
                   onAdjudicate={handleAdjudicate}
                   onCancel={handleCancel}
+                  onRaiseDispute={handleRaiseDispute}
+                  onFinalizeSettlement={handleFinalizeSettlement}
                   onChallenge={handleChallenge}
                   onOpenAudit={(b) => setSelectedAuditBounty(b)}
                   isAdjudicating={activeAdjudicatingId === bounty.bounty_id}
                   isCancelling={activeCancellingId === bounty.bounty_id}
                   isChallenging={activeChallengingId === bounty.bounty_id}
+                  isSettling={activeSettlingId === bounty.bounty_id}
                 />
               ))}
             </div>

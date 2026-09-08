@@ -27,7 +27,7 @@ def test_create_bounty(direct_vm, direct_deploy, direct_alice):
     assert bounty["claim"] == "Ethereum launched in 2015"
     assert bounty["source_url_a"] == "https://news-a.org/eth-launch"
     assert bounty["source_url_b"] == "https://news-b.com/ethereum-history"
-    assert bounty["status"] == 0  # OPEN
+    assert bounty["status"] == "OPEN"
     assert bounty["verdict"] == "PENDING"
     assert bounty["bounty_amount"] == "500000000000000000"
 
@@ -76,21 +76,22 @@ def test_adjudicate_true(direct_vm, direct_deploy, direct_alice, direct_bob, sim
 
     sim_install_mocks(direct_vm, mock_web=mock_web, mock_llm=mock_llm)
 
-    # Bob adjudicates the claim and receives the bounty reward
+    # Bob adjudicates the claim with 0.1 GEN juror bond (>= 5%)
     direct_vm.sender = direct_bob
-    direct_vm.value = 0
-    contract.adjudicate(bounty_id)
+    direct_vm.value = 100000000000000000
+    contract.join_and_adjudicate(bounty_id)
 
     bounty = json.loads(contract.get_bounty(bounty_id))
-    assert bounty["status"] == 1  # RESOLVED_TRUE
+    assert bounty["status"] == "AWAITING_PAYOUT"
     assert bounty["verdict"] == "TRUE"
     assert bounty["confidence"] == 98
     assert bounty["evidence_score"] == 95
     assert "corroborate" in bounty["reason"]
+    assert bounty["payout_ready_at"] > 0
 
-    stats = json.loads(contract.get_stats())
-    assert stats["total_claims_resolved"] == 1
-    assert stats["total_bounty_locked"] == "0"
+    all_bounties = json.loads(contract.get_all_bounties())
+    assert len(all_bounties) == 1
+    assert all_bounties[0]["bounty_id"] == bounty_id
 
 
 def test_adjudicate_false(direct_vm, direct_deploy, direct_alice, direct_bob, sim_install_mocks):
@@ -130,13 +131,13 @@ def test_adjudicate_false(direct_vm, direct_deploy, direct_alice, direct_bob, si
 
     sim_install_mocks(direct_vm, mock_web=mock_web, mock_llm=mock_llm)
 
-    # Caller triggers adjudication
+    # Caller triggers adjudication with bond
     direct_vm.sender = direct_bob
-    direct_vm.value = 0
-    contract.adjudicate(bounty_id)
+    direct_vm.value = 100000000000000000
+    contract.join_and_adjudicate(bounty_id)
 
     bounty = json.loads(contract.get_bounty(bounty_id))
-    assert bounty["status"] == 2  # RESOLVED_FALSE
+    assert bounty["status"] == "AWAITING_PAYOUT"
     assert bounty["verdict"] == "FALSE"
     assert bounty["confidence"] == 94
     assert bounty["evidence_score"] == 90
@@ -159,10 +160,11 @@ def test_adjudicate_unverified_fallback(direct_vm, direct_deploy, direct_alice, 
     sim_install_mocks(direct_vm, mock_web={}, mock_llm={})
 
     direct_vm.sender = direct_bob
-    contract.adjudicate(bounty_id)
+    direct_vm.value = 50000000000000000
+    contract.join_and_adjudicate(bounty_id)
 
     bounty = json.loads(contract.get_bounty(bounty_id))
-    assert bounty["status"] == 3  # UNVERIFIED
+    assert bounty["status"] == "AWAITING_PAYOUT"
     assert bounty["verdict"] == "UNVERIFIED"
     assert bounty["evidence_score"] == 0
     assert "external web sources" in bounty["reason"].lower() or "unreachable" in bounty["reason"].lower()
@@ -190,7 +192,7 @@ def test_cancel_bounty(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract.cancel_bounty(bounty_id)
 
     bounty = json.loads(contract.get_bounty(bounty_id))
-    assert bounty["status"] == 4  # CANCELLED
+    assert bounty["status"] == "CANCELLED"
     assert bounty["verdict"] == "CANCELLED"
     assert bounty["reason"] == "Cancelled by creator."
 
@@ -209,8 +211,9 @@ def test_creator_cannot_adjudicate_own_bounty(direct_vm, direct_deploy, direct_a
 
     # Alice (creator) tries to adjudicate her own bounty -> must be rejected
     direct_vm.sender = direct_alice
+    direct_vm.value = 50000000000000000
     with pytest.raises(Exception, match="Bounty creator cannot adjudicate"):
-        contract.adjudicate(bounty_id)
+        contract.join_and_adjudicate(bounty_id)
 
 
 def test_juror_bond_and_evidence_quotes(direct_vm, direct_deploy, direct_alice, direct_bob, sim_install_mocks):
@@ -252,26 +255,26 @@ def test_juror_bond_and_evidence_quotes(direct_vm, direct_deploy, direct_alice, 
 
     sim_install_mocks(direct_vm, mock_web=mock_web, mock_llm=mock_llm)
 
-    # Bob joins and adjudicates with 0.1 GEN Juror Bond
+    # Bob joins and adjudicates with 0.1 GEN Juror Bond (>= 5%)
     direct_vm.sender = direct_bob
     direct_vm.value = 100000000000000000  # 0.1 GEN bond
     contract.join_and_adjudicate(bounty_id)
 
     bounty = json.loads(contract.get_bounty(bounty_id))
-    assert bounty["status"] == 2  # RESOLVED_FALSE
+    assert bounty["status"] == "AWAITING_PAYOUT"
     assert bounty["verdict"] == "FALSE"
     assert "Replication attempts failed" in bounty["evidence_quote_a"]
     assert "Independent labs confirm" in bounty["evidence_quote_b"]
     assert bounty["juror_bond"] == "100000000000000000"
 
-    # Anti-griefing check: Creator cannot cancel after adjudication
+    # Anti-griefing check: Creator cannot cancel after adjudication has started
     direct_vm.sender = direct_alice
     with pytest.raises(Exception, match="no longer OPEN"):
         contract.cancel_bounty(bounty_id)
 
 
 def test_challenge_appeal_flow(direct_vm, direct_deploy, direct_alice, direct_bob, sim_install_mocks):
-    """Test challenging a resolved verdict to open an appeal court window."""
+    """Test challenging a resolved verdict during cooling off to freeze escrow in dispute."""
     contract = direct_deploy(str(CONTRACT_PATH))
 
     direct_vm.sender = direct_alice
@@ -302,15 +305,50 @@ def test_challenge_appeal_flow(direct_vm, direct_deploy, direct_alice, direct_bo
     direct_vm.value = 50000000000000000
     contract.join_and_adjudicate(bounty_id)
 
-    # Alice disputes the verdict and files an appeal
+    # Alice disputes the verdict during the 24h cooling-off window
     direct_vm.sender = direct_alice
-    direct_vm.value = 50000000000000000
-    contract.challenge_verdict(bounty_id, "Evidence from Source A is outdated; mayor vetoed the bill yesterday.")
+    contract.raise_dispute(bounty_id, "Evidence from Source A is outdated; mayor vetoed the bill yesterday.")
 
     bounty = json.loads(contract.get_bounty(bounty_id))
-    assert bounty["status"] == 5  # IN_APPEAL
-    assert bounty["verdict"] == "IN_APPEAL"
-    assert bounty["appeal_count"] == 1
+    assert bounty["status"] == "DISPUTED"
     assert "mayor vetoed" in bounty["dispute_reason"]
+
+
+def test_settlement_cooling_off_protection(direct_vm, direct_deploy, direct_alice, direct_bob, sim_install_mocks):
+    """Test that settlement cannot be prematurely finalized during the 24h cooling-off window."""
+    contract = direct_deploy(str(CONTRACT_PATH))
+
+    direct_vm.sender = direct_alice
+    direct_vm.value = 1000000000000000000
+    bounty_id = contract.create_bounty(
+        claim="Federal reserve announces interest rate hold",
+        source_url_a="https://fed.example/statement",
+        source_url_b="https://wsj.example/fed",
+    )
+
+    sim_install_mocks(
+        direct_vm,
+        mock_web={
+            "https://fed.example/statement": {"method": "GET", "status": 200, "body": "Rates unchanged."},
+            "https://wsj.example/fed": {"method": "GET", "status": 200, "body": "Rates maintained."},
+        },
+        mock_llm={
+            r".*interest rate.*": json.dumps({
+                "verdict": "TRUE",
+                "confidence": 95,
+                "evidence_score": 90,
+                "reason": "Federal reserve kept rates steady.",
+            })
+        }
+    )
+
+    direct_vm.sender = direct_bob
+    direct_vm.value = 50000000000000000
+    contract.join_and_adjudicate(bounty_id)
+
+    # Attempt to settle immediately before 24h elapses -> must be blocked
+    direct_vm.sender = direct_bob
+    with pytest.raises(Exception, match="cooling-off period has not elapsed"):
+        contract.finalize_settlement(bounty_id)
 
 

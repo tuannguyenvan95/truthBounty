@@ -4,7 +4,14 @@ import { parseEther } from 'viem';
 
 interface CreateClaimProps {
   account: string | null;
-  onSubmit: (data: { claim: string; sourceUrlA: string; sourceUrlB: string; amountGen: string }) => Promise<void>;
+  onSubmit: (data: {
+    claim: string;
+    sourceUrlA: string;
+    sourceUrlB: string;
+    amountGen: string;
+    hashA?: string;
+    hashB?: string;
+  }) => Promise<void>;
   isSubmitting: boolean;
 }
 
@@ -41,6 +48,9 @@ export const CreateClaim: React.FC<CreateClaimProps> = ({
   const [claim, setClaim] = useState('');
   const [sourceUrlA, setSourceUrlA] = useState('');
   const [sourceUrlB, setSourceUrlB] = useState('');
+  const [hashA, setHashA] = useState('');
+  const [hashB, setHashB] = useState('');
+  const [showIntegrity, setShowIntegrity] = useState(false);
   const [amountGen, setAmountGen] = useState('0.1');
   const [error, setError] = useState<string | null>(null);
 
@@ -81,11 +91,15 @@ export const CreateClaim: React.FC<CreateClaimProps> = ({
         sourceUrlA: sourceUrlA.trim(),
         sourceUrlB: sourceUrlB.trim(),
         amountGen: sanitizedAmount,
+        hashA: hashA.trim().toLowerCase(),
+        hashB: hashB.trim().toLowerCase(),
       });
       // Clear form on success
       setClaim('');
       setSourceUrlA('');
       setSourceUrlB('');
+      setHashA('');
+      setHashB('');
       setAmountGen('0.1');
       setIsOpen(false);
     } catch (err: any) {
@@ -210,6 +224,61 @@ export const CreateClaim: React.FC<CreateClaimProps> = ({
                   disabled={isSubmitting}
                 />
               </div>
+            </div>
+
+            {/* Advanced: SHA-256 Artifact Pinning (Anti-Tampering) */}
+            <div className="rounded-xl border border-slate-800 bg-slate-950/40 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowIntegrity(!showIntegrity)}
+                className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-semibold text-slate-300 hover:text-cyan-400 hover:bg-slate-900/50 transition"
+              >
+                <span className="flex items-center gap-2">
+                  <span>🛡️ Optional: SHA-256 Artifact Pinning (Anti-Tampering)</span>
+                  {(hashA || hashB) && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                      Active
+                    </span>
+                  )}
+                </span>
+                <span className="text-slate-500">{showIntegrity ? '▲ Hide' : '▼ Expand'}</span>
+              </button>
+
+              {showIntegrity && (
+                <div className="p-4 border-t border-slate-800/80 space-y-3 bg-slate-900/30">
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Pin cryptographic SHA-256 hashes of webpage contents to guarantee sources cannot be secretly edited or updated after submitting. If validator content does not match, status escalates to ESCALATE/DISPUTED.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Source A Expected SHA-256 Hash
+                      </label>
+                      <input
+                        type="text"
+                        value={hashA}
+                        onChange={(e) => setHashA(e.target.value)}
+                        placeholder="e.g. a3c2f0... (64 hex chars)"
+                        className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-xs text-cyan-300 font-mono outline-none"
+                        disabled={isSubmitting}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Source B Expected SHA-256 Hash
+                      </label>
+                      <input
+                        type="text"
+                        value={hashB}
+                        onChange={(e) => setHashB(e.target.value)}
+                        placeholder="e.g. b7d8e1... (64 hex chars)"
+                        className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-xs text-blue-300 font-mono outline-none"
+                        disabled={isSubmitting}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Escrow Amount */}

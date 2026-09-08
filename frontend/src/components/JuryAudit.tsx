@@ -1,6 +1,17 @@
 import React from 'react';
 import { X, Scale, ExternalLink, ShieldCheck, CheckCircle2, AlertOctagon, HelpCircle, Ban, Cpu, Globe, Database } from 'lucide-react';
-import { BountyItem, STUDIONET_EXPLORER_URL, formatGenAmount } from '../config/genlayer';
+import {
+  BountyItem,
+  STUDIONET_EXPLORER_URL,
+  formatGenAmount,
+  isBountyOpen,
+  isBountyAwaitingPayout,
+  isBountyResolvedTrue,
+  isBountyResolvedFalse,
+  isBountyUnverified,
+  isBountyCancelled,
+  isBountyDisputed,
+} from '../config/genlayer';
 
 interface JuryAuditProps {
   bounty: BountyItem | null;
@@ -18,45 +29,63 @@ export const JuryAudit: React.FC<JuryAuditProps> = ({
   const formattedAmount = formatGenAmount(bounty.bounty_amount);
 
   const renderVerdictBadge = () => {
-    switch (bounty.status) {
-      case 0:
-        return (
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 text-xs font-bold">
-            <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
-            PENDING ADJUDICATION
-          </div>
-        );
-      case 1:
-        return (
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-bold">
-            <CheckCircle2 className="h-4 w-4" />
-            VERDICT: TRUE (CORROBORATED)
-          </div>
-        );
-      case 2:
-        return (
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/30 text-xs font-bold">
-            <AlertOctagon className="h-4 w-4" />
-            VERDICT: FALSE (DEBUNKED)
-          </div>
-        );
-      case 3:
-        return (
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 text-xs font-bold">
-            <HelpCircle className="h-4 w-4" />
-            VERDICT: UNVERIFIED (INSUFFICIENT PROOF)
-          </div>
-        );
-      case 4:
-        return (
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 text-slate-400 border border-slate-700 text-xs font-bold">
-            <Ban className="h-4 w-4" />
-            CANCELLED BY CREATOR
-          </div>
-        );
-      default:
-        return null;
+    if (isBountyOpen(bounty.status)) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 text-xs font-bold">
+          <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
+          PENDING ADJUDICATION
+        </div>
+      );
     }
+    if (isBountyAwaitingPayout(bounty.status)) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/40 text-xs font-bold animate-pulse">
+          <span className="h-2 w-2 rounded-full bg-amber-400 animate-ping" />
+          AWAITING PAYOUT (24H COOLING-OFF)
+        </div>
+      );
+    }
+    if (isBountyDisputed(bounty.status)) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/40 text-xs font-bold">
+          <Scale className="h-4 w-4 text-purple-400" />
+          UNDER DISPUTE (ESCROW FROZEN)
+        </div>
+      );
+    }
+    if (isBountyResolvedTrue(bounty.status)) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-bold">
+          <CheckCircle2 className="h-4 w-4" />
+          VERDICT: TRUE (CORROBORATED)
+        </div>
+      );
+    }
+    if (isBountyResolvedFalse(bounty.status)) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/30 text-xs font-bold">
+          <AlertOctagon className="h-4 w-4" />
+          VERDICT: FALSE (DEBUNKED)
+        </div>
+      );
+    }
+    if (isBountyUnverified(bounty.status)) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 text-xs font-bold">
+          <HelpCircle className="h-4 w-4" />
+          VERDICT: UNVERIFIED (REFUNDED)
+        </div>
+      );
+    }
+    if (isBountyCancelled(bounty.status)) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 text-slate-400 border border-slate-700 text-xs font-bold">
+          <Ban className="h-4 w-4" />
+          CANCELLED BY CREATOR
+        </div>
+      );
+    }
+    return null;
   };
 
   return (
@@ -182,9 +211,34 @@ export const JuryAudit: React.FC<JuryAuditProps> = ({
                 </span>
               </div>
             </div>
+            {/* SHA-256 Artifact Pinning Proof */}
+            {(bounty.source_hash_a || bounty.source_hash_b) && (
+              <div className="p-2.5 rounded-lg bg-slate-900/90 border border-cyan-500/30 text-[11px] space-y-1">
+                <span className="font-bold text-cyan-300 block">Cryptographic Artifact Pinning (SHA-256):</span>
+                {bounty.source_hash_a && (
+                  <div className="font-mono text-[10px] text-slate-300 truncate">
+                    <span className="text-cyan-400">Source A Hash:</span> {bounty.source_hash_a}
+                  </div>
+                )}
+                {bounty.source_hash_b && (
+                  <div className="font-mono text-[10px] text-slate-300 truncate">
+                    <span className="text-blue-400">Source B Hash:</span> {bounty.source_hash_b}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Cooling-off window info */}
+            {bounty.payout_ready_at && Number(bounty.payout_ready_at) > 0 && (
+              <div className="p-2 rounded-lg bg-amber-950/40 border border-amber-700/40 text-amber-300 text-[11px]">
+                <span className="font-bold">24h Dispute Cooling-Off Window:</span> Payout unlock timestamp:{' '}
+                <span className="font-mono">{new Date(Number(bounty.payout_ready_at) * 1000).toLocaleString()}</span>
+              </div>
+            )}
+
             {bounty.dispute_reason && bounty.dispute_reason !== 'None' && (
               <div className="p-2 rounded-lg bg-purple-950/40 border border-purple-800/40 text-purple-300 text-[11px]">
-                <span className="font-bold">Appeal Recorded:</span> {bounty.dispute_reason} (Appeals: {bounty.appeal_count || 1})
+                <span className="font-bold">Dispute / Appeal Recorded:</span> {bounty.dispute_reason}
               </div>
             )}
           </div>

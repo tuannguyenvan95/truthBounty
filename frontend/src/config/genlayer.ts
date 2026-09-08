@@ -108,8 +108,10 @@ export interface BountyItem {
   claim: string;
   source_url_a: string;
   source_url_b: string;
-  status: number; // 0: OPEN, 1: RESOLVED_TRUE, 2: RESOLVED_FALSE, 3: UNVERIFIED, 4: CANCELLED, 5: IN_APPEAL
-  verdict: string; // "PENDING", "TRUE", "FALSE", "UNVERIFIED", "CANCELLED", "IN_APPEAL"
+  source_hash_a?: string;
+  source_hash_b?: string;
+  status: string | number; // "OPEN", "AWAITING_PAYOUT", "RESOLVED_TRUE", "RESOLVED_FALSE", "UNVERIFIED", "DISPUTED", "CANCELLED" | 0..5
+  verdict: string; // "PENDING", "TRUE", "FALSE", "UNVERIFIED", "ESCALATE", "CANCELLED"
   reason: string;
   confidence: number;
   evidence_score: number;
@@ -117,10 +119,40 @@ export interface BountyItem {
   evidence_quote_b?: string;
   juror?: string;
   juror_bond?: string;
-  appeal_count?: number;
+  payout_ready_at?: number | string;
+  disputed_at?: number | string;
   dispute_reason?: string;
-  created_at_block: string | number;
+  appeal_count?: number;
+  created_at_block?: string | number;
 }
+
+export const isBountyOpen = (status: string | number): boolean => {
+  return status === 0 || status === '0' || status === 'OPEN';
+};
+
+export const isBountyAwaitingPayout = (status: string | number): boolean => {
+  return status === 'AWAITING_PAYOUT';
+};
+
+export const isBountyResolvedTrue = (status: string | number): boolean => {
+  return status === 1 || status === '1' || status === 'RESOLVED_TRUE';
+};
+
+export const isBountyResolvedFalse = (status: string | number): boolean => {
+  return status === 2 || status === '2' || status === 'RESOLVED_FALSE';
+};
+
+export const isBountyUnverified = (status: string | number): boolean => {
+  return status === 3 || status === '3' || status === 'UNVERIFIED';
+};
+
+export const isBountyCancelled = (status: string | number): boolean => {
+  return status === 4 || status === '4' || status === 'CANCELLED';
+};
+
+export const isBountyDisputed = (status: string | number): boolean => {
+  return status === 5 || status === '5' || status === 'DISPUTED' || status === 'IN_APPEAL';
+};
 
 export interface PlatformStats {
   total_bounties: number;
