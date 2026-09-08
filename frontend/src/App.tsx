@@ -306,33 +306,53 @@ export function App() {
     try {
       setActiveAdjudicatingId(bountyId);
 
-      // Dual-Sided Protection: Calculate 5% refundable juror bond
-      let jurorBondWei = 5000000000000000n; // 0.005 GEN default
-      if (targetBounty) {
-        try {
-          const rawBountyVal = BigInt(targetBounty.bounty_amount);
-          const computed5Percent = rawBountyVal / 20n;
-          if (computed5Percent > jurorBondWei) jurorBondWei = computed5Percent;
-        } catch {}
-      }
-
-      showToast('info', `Staking ${Number(formatEther(jurorBondWei)).toFixed(3)} GEN refundable bond & activating GenLayer AI Jury...`);
-
       const client = getGenLayerClient();
       const userChecksummed = getAddress(account);
       const contractChecksummed = getAddress(contractAddress);
 
+      // Check contract capability: does this deployed contract support join_and_adjudicate or legacy adjudicate?
+      let targetFunction = 'adjudicate';
+      let txValue = 0n;
+
+      try {
+        const schema = await client.getContractSchema(contractChecksummed);
+        if (schema?.methods?.join_and_adjudicate) {
+          targetFunction = 'join_and_adjudicate';
+          let jurorBondWei = 5000000000000000n; // 0.005 GEN default
+          if (targetBounty) {
+            try {
+              const rawBountyVal = BigInt(targetBounty.bounty_amount);
+              const computed5Percent = rawBountyVal / 20n;
+              if (computed5Percent > jurorBondWei) jurorBondWei = computed5Percent;
+            } catch {}
+          }
+          txValue = jurorBondWei;
+        }
+      } catch (schemaErr) {
+        console.warn('Schema check fallback:', schemaErr);
+      }
+
+      if (txValue > 0n) {
+        showToast('info', `Staking ${Number(formatEther(txValue)).toFixed(3)} GEN refundable bond & activating GenLayer AI Jury...`);
+      } else {
+        showToast('info', `Activating GenLayer on-chain AI Jury for #${bountyId}...`);
+      }
+
       const txHash = await client.writeContract({
         address: contractChecksummed,
-        functionName: 'join_and_adjudicate',
+        functionName: targetFunction,
         args: [bountyId],
-        value: jurorBondWei,
+        value: txValue,
         account: { address: userChecksummed } as any,
       });
 
-      showToast('info', `Adjudication running (${txHash.slice(0, 10)}...). Scraping sources & reaching consensus...`);
+      showToast('info', `Transaction confirmed (${txHash.slice(0, 10)}...). Scraping sources & reaching consensus on GenLayer...`);
 
-      await client.waitForTransactionReceipt({ hash: txHash as any });
+      const receipt = await client.waitForTransactionReceipt({ hash: txHash as any });
+      console.log('Transaction receipt:', receipt);
+
+      // Wait 3 seconds for GenLayer consensus state sync
+      await new Promise((resolve) => setTimeout(resolve, 3000));
 
       showToast('success', `Jury verdict rendered on-chain for #${bountyId}!`);
       await fetchContractData();
@@ -360,12 +380,23 @@ export function App() {
 
     try {
       setActiveChallengingId(bountyId);
-      const appealBondWei = 10000000000000000n; // 0.01 GEN appeal bond
-      showToast('info', `Filing on-chain appeal with ${Number(formatEther(appealBondWei)).toFixed(3)} GEN appeal bond...`);
 
       const client = getGenLayerClient();
       const userChecksummed = getAddress(account);
       const contractChecksummed = getAddress(contractAddress);
+
+      // Check if current contract supports challenge_verdict
+      try {
+        const schema = await client.getContractSchema(contractChecksummed);
+        if (!schema?.methods?.challenge_verdict) {
+          showToast('error', 'The active contract instance (0xA11e) is an earlier deployment without on-chain appeals. Please deploy or switch to an upgraded contract via settings.');
+          setActiveChallengingId(null);
+          return;
+        }
+      } catch {}
+
+      const appealBondWei = 10000000000000000n; // 0.01 GEN appeal bond
+      showToast('info', `Filing on-chain appeal with ${Number(formatEther(appealBondWei)).toFixed(3)} GEN appeal bond...`);
 
       const txHash = await client.writeContract({
         address: contractChecksummed,
@@ -378,6 +409,7 @@ export function App() {
       showToast('info', `Appeal transaction submitted (${txHash.slice(0, 10)}...). Escalating case...`);
 
       await client.waitForTransactionReceipt({ hash: txHash as any });
+      await new Promise((resolve) => setTimeout(resolve, 3000));
 
       showToast('success', `Appeal recorded on-chain! Case escalated to High Court.`);
       await fetchContractData();
