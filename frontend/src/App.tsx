@@ -7,6 +7,7 @@ import { JuryAudit } from './components/JuryAudit';
 import { ContractSettingsModal } from './components/ContractSettingsModal';
 import {
   BountyItem,
+  OFFICIAL_CONTRACT_ADDRESS,
   PlatformStats,
   STUDIONET_CHAIN_ID,
   getDefaultContractAddress,
@@ -20,13 +21,91 @@ import { formatEther, parseEther, getAddress } from 'viem';
 import type { Address } from 'viem';
 import { Search, Filter, ShieldCheck, Sparkles, AlertCircle, CheckCircle2, Loader2, Info, Users, Briefcase } from 'lucide-react';
 
+const SEED_BOUNTIES_0XA11E: BountyItem[] = [
+  {
+    bounty_id: 'truth-4',
+    claim: 'DeepSeek open-sources V3 frontier reasoning model with 671B parameters',
+    source_url_a: 'https://techcrunch.com/deepseek-v3-model-weights',
+    source_url_b: 'https://theverge.com/deepseek-ai-reasoning-open-source',
+    bounty_amount: '150000000000000000',
+    creator: '0x8b0bb30f87895066929e71f9cf5c63fc7cba2856',
+    status: 3,
+    verdict: 'UNVERIFIED',
+    reason: 'Both external web sources could not be reached or returned empty diffs.',
+    confidence: 100,
+    evidence_score: 0,
+    evidence_quote_a: 'Source A unreachable or blocked by anti-bot.',
+    evidence_quote_b: 'Source B unreachable or blocked by anti-bot.',
+    created_at_block: 4,
+  },
+  {
+    bounty_id: 'truth-3',
+    claim: 'Major European bank declares emergency insolvency due to digital asset exposure',
+    source_url_a: 'https://bloomberg.com/news/articles/bank-solvency-report',
+    source_url_b: 'https://ft.com/content/european-banking-audit',
+    bounty_amount: '15000000000000000000',
+    creator: '0x8b0bb30f87895066929e71f9cf5c63fc7cba2856',
+    status: 0,
+    verdict: 'PENDING',
+    reason: 'Awaiting independent DePIN juror and multi-source AI consensus.',
+    confidence: 0,
+    evidence_score: 0,
+    evidence_quote_a: 'Pending juror retrieval.',
+    evidence_quote_b: 'Pending juror retrieval.',
+    created_at_block: 3,
+  },
+  {
+    bounty_id: 'truth-2',
+    claim: 'SpaceX successfully launched Starship Flight 5 and caught the booster',
+    source_url_a: 'https://reuters.com/technology/space/spacex-starship-flight-5',
+    source_url_b: 'https://bbc.com/news/articles/spacex-starship-booster-catch',
+    bounty_amount: '10000000000000000000',
+    creator: '0x8b0bb30f87895066929e71f9cf5c63fc7cba2856',
+    status: 3,
+    verdict: 'UNVERIFIED',
+    reason: 'Both external web sources could not be reached or returned empty diffs.',
+    confidence: 100,
+    evidence_score: 0,
+    evidence_quote_a: 'Source A unreachable or blocked by anti-bot.',
+    evidence_quote_b: 'Source B unreachable or blocked by anti-bot.',
+    created_at_block: 2,
+  },
+  {
+    bounty_id: 'truth-1',
+    claim: 'SpaceX successfully launched Starship Flight 5 and caught the booster',
+    source_url_a: 'https://reuters.com/technology/space/spacex-starship-flight-5',
+    source_url_b: 'https://bbc.com/news/articles/spacex-starship-booster-catch',
+    bounty_amount: '10000000000000000000',
+    creator: '0x52c5d806c97f0e00af1a1fc3328fa763a9269723',
+    status: 3,
+    verdict: 'UNVERIFIED',
+    reason: 'Both external web sources could not be reached or returned empty diffs.',
+    confidence: 100,
+    evidence_score: 0,
+    evidence_quote_a: 'Source A unreachable or blocked by anti-bot.',
+    evidence_quote_b: 'Source B unreachable or blocked by anti-bot.',
+    created_at_block: 1,
+  },
+];
+
+const SEED_STATS_0XA11E: PlatformStats = {
+  total_bounties: 4,
+  total_bounty_locked: '15000000000000000000',
+  total_claims_resolved: 3,
+};
+
 const getCachedBounties = (addr: string): BountyItem[] => {
   try {
     const raw = localStorage.getItem(`tb_cache_bounties_${addr.toLowerCase()}`);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  if (addr.toLowerCase() === OFFICIAL_CONTRACT_ADDRESS.toLowerCase()) {
+    return SEED_BOUNTIES_0XA11E;
   }
+  return [];
 };
 
 const setCachedBounties = (addr: string, items: BountyItem[]) => {
@@ -47,7 +126,12 @@ export function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Data State
-  const [stats, setStats] = useState<PlatformStats | null>(null);
+  const [stats, setStats] = useState<PlatformStats | null>(() => {
+    if (getDefaultContractAddress().toLowerCase() === OFFICIAL_CONTRACT_ADDRESS.toLowerCase()) {
+      return SEED_STATS_0XA11E;
+    }
+    return null;
+  });
   const [bounties, setBounties] = useState<BountyItem[]>(() =>
     getCachedBounties(getDefaultContractAddress())
   );
@@ -309,19 +393,19 @@ export function App() {
     }
   }, [account, updateBalance]);
 
-  // Auto-polling interval: smooth 8s sync without spamming GenLayer RPC
+  // Background polling (every 45s) to stay strictly within GenLayer's 500 req/hr rate limit
   useEffect(() => {
     fetchContractData();
     const interval = setInterval(() => {
       fetchContractData(true);
-    }, 8000);
+    }, 45000);
     return () => clearInterval(interval);
   }, [fetchContractData]);
 
   // Window focus & Cross-tab sync with debounce to prevent flickering
   useEffect(() => {
     const handleFocus = () => {
-      if (Date.now() - lastFetchTimeRef.current > 3000) {
+      if (Date.now() - lastFetchTimeRef.current > 15000) {
         fetchContractData(true);
         if (account) updateBalance(account);
       }
