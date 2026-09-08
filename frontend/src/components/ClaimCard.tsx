@@ -1,5 +1,5 @@
 import React from 'react';
-import { ExternalLink, Gavel, XCircle, FileText, CheckCircle2, AlertOctagon, HelpCircle, Ban, ArrowUpRight, Scale } from 'lucide-react';
+import { ExternalLink, Gavel, XCircle, FileText, CheckCircle2, AlertOctagon, HelpCircle, Ban, ArrowUpRight, Scale, Lock } from 'lucide-react';
 import { BountyItem, formatGenAmount } from '../config/genlayer';
 
 interface ClaimCardProps {
@@ -27,6 +27,14 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
 }) => {
   const isCreator = currentAccount && bounty.creator.toLowerCase() === currentAccount.toLowerCase();
   const isOpen = bounty.status === 0;
+  const hasJurorJoined = Boolean(
+    (bounty.juror &&
+      bounty.juror.toLowerCase() !== bounty.creator.toLowerCase() &&
+      bounty.juror !== '0x0000000000000000000000000000000000000000' &&
+      bounty.juror !== '0x0' &&
+      bounty.juror !== '') ||
+    (bounty.juror_bond && BigInt(bounty.juror_bond) > 0n)
+  );
 
   const formattedAmount = React.useMemo(() => {
     return formatGenAmount(bounty.bounty_amount);
@@ -206,20 +214,30 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
           {isOpen && (
             <>
               {isCreator ? (
-                <div className="flex items-center gap-2">
-                  <span className="hidden sm:inline text-[11px] text-amber-400/90 font-medium bg-amber-950/40 px-2 py-1 rounded-lg border border-amber-800/40">
-                    Awaiting 3rd-party juror
-                  </span>
-                  <button
-                    onClick={() => onCancel(bounty.bounty_id)}
-                    disabled={isCancelling}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-950/50 border border-rose-700/50 hover:bg-rose-900/60 text-rose-200 font-bold text-xs transition disabled:opacity-50"
-                    title="Cancel your bounty and withdraw your locked GEN escrow"
+                hasJurorJoined ? (
+                  <div
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-950/60 border border-blue-600/40 text-blue-300 text-xs font-semibold"
+                    title="A juror has joined and committed to adjudicating this bounty. Escrow is strictly locked to protect the juror against creator fraud/quỵt."
                   >
-                    <XCircle className="h-3.5 w-3.5" />
-                    <span>{isCancelling ? 'Cancelling...' : 'Cancel & Refund'}</span>
-                  </button>
-                </div>
+                    <Lock className="h-3.5 w-3.5 text-blue-400" />
+                    <span>Juror Evaluating ({bounty.juror?.slice(0, 6)}...) - Escrow Locked</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="hidden sm:inline text-[11px] text-amber-400/90 font-medium bg-amber-950/40 px-2 py-1 rounded-lg border border-amber-800/40">
+                      Awaiting 3rd-party juror
+                    </span>
+                    <button
+                      onClick={() => onCancel(bounty.bounty_id)}
+                      disabled={isCancelling}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-950/50 border border-rose-700/50 hover:bg-rose-900/60 text-rose-200 font-bold text-xs transition disabled:opacity-50"
+                      title="Cancel your bounty and withdraw your locked GEN escrow"
+                    >
+                      <XCircle className="h-3.5 w-3.5" />
+                      <span>{isCancelling ? 'Cancelling...' : 'Cancel & Refund'}</span>
+                    </button>
+                  </div>
+                )
               ) : (
                 <button
                   onClick={() => onAdjudicate(bounty.bounty_id)}

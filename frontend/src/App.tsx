@@ -127,13 +127,13 @@ export function App() {
   }, []);
 
   // Fetch on-chain data
-  const fetchContractData = useCallback(async () => {
+  const fetchContractData = useCallback(async (isSilent = false) => {
     if (!contractAddress || contractAddress === '0x0000000000000000000000000000000000000000') {
       return;
     }
 
     try {
-      setIsRefreshing(true);
+      if (!isSilent) setIsRefreshing(true);
       const client = getGenLayerClient();
 
       // 1. Fetch platform stats
@@ -147,7 +147,7 @@ export function App() {
           setStats(JSON.parse(rawStats));
         }
       } catch (e) {
-        console.warn('get_stats failed:', e);
+        if (!isSilent) console.warn('get_stats failed:', e);
       }
 
       // 2. Fetch bounty count
@@ -160,7 +160,7 @@ export function App() {
         });
         count = Number(countRes);
       } catch (e) {
-        console.warn('get_bounty_count failed:', e);
+        if (!isSilent) console.warn('get_bounty_count failed:', e);
       }
 
       // 3. Fetch each bounty
@@ -183,15 +183,15 @@ export function App() {
             items.push(JSON.parse(rawBounty));
           }
         } catch (itemErr) {
-          console.warn(`Failed to fetch bounty at index ${i}:`, itemErr);
+          if (!isSilent) console.warn(`Failed to fetch bounty at index ${i}:`, itemErr);
         }
       }
 
       setBounties(items);
     } catch (err: any) {
-      console.error('Fetch error:', err);
+      if (!isSilent) console.error('Fetch error:', err);
     } finally {
-      setIsRefreshing(false);
+      if (!isSilent) setIsRefreshing(false);
       setIsLoading(false);
     }
   }, [contractAddress]);
@@ -241,9 +241,36 @@ export function App() {
     }
   }, [account, updateBalance]);
 
+  // Auto-polling interval: keeps multiple windows / tabs / devices synchronized every 4s
   useEffect(() => {
     fetchContractData();
+    const interval = setInterval(() => {
+      fetchContractData(true);
+    }, 4000);
+    return () => clearInterval(interval);
   }, [fetchContractData]);
+
+  // Window focus & Cross-tab sync: instantly refetch when user switches windows or tabs
+  useEffect(() => {
+    const handleFocus = () => {
+      fetchContractData(true);
+      if (account) updateBalance(account);
+    };
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'truthbounty_sync_ping') {
+        fetchContractData(true);
+        if (account) updateBalance(account);
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [fetchContractData, account, updateBalance]);
 
   // Create Bounty Handler
   const handleCreateBounty = async (data: {
@@ -280,6 +307,7 @@ export function App() {
       await client.waitForTransactionReceipt({ hash: txHash as any });
 
       showToast('success', `Bounty successfully registered and locked in escrow!`);
+      localStorage.setItem('truthbounty_sync_ping', Date.now().toString());
       await fetchContractData();
       if (account) updateBalance(account);
     } catch (err: any) {
@@ -356,6 +384,7 @@ export function App() {
       await new Promise((resolve) => setTimeout(resolve, 3000));
 
       showToast('success', `Jury verdict rendered on-chain for #${bountyId}!`);
+      localStorage.setItem('truthbounty_sync_ping', Date.now().toString());
       await fetchContractData();
       if (account) updateBalance(account);
     } catch (err: any) {
@@ -419,6 +448,7 @@ export function App() {
       await new Promise((resolve) => setTimeout(resolve, 3000));
 
       showToast('success', `Appeal recorded on-chain! Case escalated to High Court.`);
+      localStorage.setItem('truthbounty_sync_ping', Date.now().toString());
       await fetchContractData();
       if (account) updateBalance(account);
     } catch (err: any) {
@@ -436,6 +466,20 @@ export function App() {
     const targetBounty = bounties.find((b) => b.bounty_id === bountyId);
     if (targetBounty && targetBounty.creator.toLowerCase() !== account.toLowerCase()) {
       showToast('error', 'Permission Denied: Only the bounty creator can cancel this bounty.');
+      return;
+    }
+
+    // Anti-quỵt check: Escrow locked once a 3rd-party juror has joined or staked bond
+    const hasJuror = Boolean(
+      (targetBounty?.juror &&
+        targetBounty.juror.toLowerCase() !== targetBounty.creator.toLowerCase() &&
+        targetBounty.juror !== '0x0000000000000000000000000000000000000000' &&
+        targetBounty.juror !== '0x0') ||
+      (targetBounty?.juror_bond && BigInt(targetBounty.juror_bond) > 0n)
+    );
+
+    if (hasJuror) {
+      showToast('error', 'Lệnh hủy bị chặn: Đã có Juror tham gia vụ án này. Tiền ký quỹ đã được khóa an toàn để bảo vệ Juror tránh trường hợp người tạo gian lận/quỵt!');
       return;
     }
 
@@ -458,6 +502,7 @@ export function App() {
       await client.waitForTransactionReceipt({ hash: txHash as any });
 
       showToast('success', `Bounty #${bountyId} cancelled. Funds returned to your wallet!`);
+      localStorage.setItem('truthbounty_sync_ping', Date.now().toString());
       await fetchContractData();
       if (account) updateBalance(account);
     } catch (err: any) {

@@ -354,6 +354,12 @@ Respond ONLY with a valid JSON object, without markdown formatting or code fence
         if bounty.status != u8(0):
             raise Exception("Cannot cancel: Bounty is no longer OPEN.")
 
+        # Anti-quỵt protection: cannot cancel if a 3rd-party juror has joined or staked bond
+        juror_str = _addr_str(bounty.juror).lower()
+        creator_str = _addr_str(bounty.creator).lower()
+        if (juror_str != creator_str and juror_str not in ("", "0x0", "0x0000000000000000000000000000000000000000")) or bounty.juror_bond > bigint(0):
+            raise Exception("Cannot cancel: A juror has already joined this bounty. Escrow is locked to protect the juror.")
+
         bounty.status = u8(4)  # CANCELLED
         bounty.verdict = "CANCELLED"
         bounty.reason = "Cancelled by creator."
