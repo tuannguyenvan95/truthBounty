@@ -373,12 +373,6 @@ export function App() {
       return;
     }
 
-    const appealPrompt = window.prompt(
-      'Enter reason for appealing this verdict to the GenLayer High Court:',
-      'Dispute verdict: external web sources were ambiguous or contradictory.'
-    );
-    if (!appealPrompt || !appealPrompt.trim()) return;
-
     try {
       setActiveChallengingId(bountyId);
 
@@ -386,15 +380,27 @@ export function App() {
       const userChecksummed = getAddress(account);
       const contractChecksummed = getAddress(contractAddress);
 
-      // Check if current contract supports challenge_verdict
+      // Check if current contract supports challenge_verdict BEFORE prompting
       try {
         const schema = await client.getContractSchema(contractChecksummed);
         if (!schema?.methods?.challenge_verdict) {
-          showToast('error', 'The active contract instance (0xA11e) is an earlier deployment without on-chain appeals. Please deploy or switch to an upgraded contract via settings.');
+          showToast('error', 'Hợp đồng hiện tại (0xA11e) là bản deploy trước đó chưa có tính năng Kháng cáo on-chain. Mở Settings để deploy contract mới với 1-click.');
+          setIsSettingsOpen(true);
           setActiveChallengingId(null);
           return;
         }
-      } catch {}
+      } catch (e) {
+        console.warn('Could not read contract schema for appeal:', e);
+      }
+
+      const appealPrompt = window.prompt(
+        'Enter reason for appealing this verdict to the GenLayer High Court:',
+        'Dispute verdict: external web sources were ambiguous or contradictory.'
+      );
+      if (!appealPrompt || !appealPrompt.trim()) {
+        setActiveChallengingId(null);
+        return;
+      }
 
       const appealBondWei = 10000000000000000n; // 0.01 GEN appeal bond
       showToast('info', `Filing on-chain appeal with ${formatGenAmount(appealBondWei)} GEN appeal bond...`);
