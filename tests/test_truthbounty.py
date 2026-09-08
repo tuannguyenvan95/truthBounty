@@ -193,3 +193,22 @@ def test_cancel_bounty(direct_vm, direct_deploy, direct_alice, direct_bob):
     assert bounty["status"] == 4  # CANCELLED
     assert bounty["verdict"] == "CANCELLED"
     assert bounty["reason"] == "Cancelled by creator."
+
+
+def test_creator_cannot_adjudicate_own_bounty(direct_vm, direct_deploy, direct_alice):
+    """Test that the bounty creator is blocked from adjudicating/joining their own bounty."""
+    contract = direct_deploy(str(CONTRACT_PATH))
+    
+    direct_vm.sender = direct_alice
+    direct_vm.value = 1000000000000000000
+    bounty_id = contract.create_bounty(
+        claim="Breaking news to self-verify",
+        source_url_a="https://news.example/1",
+        source_url_b="https://news.example/2",
+    )
+
+    # Alice (creator) tries to adjudicate her own bounty -> must be rejected
+    direct_vm.sender = direct_alice
+    with pytest.raises(Exception, match="Bounty creator cannot adjudicate"):
+        contract.adjudicate(bounty_id)
+

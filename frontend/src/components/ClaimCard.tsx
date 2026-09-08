@@ -90,6 +90,11 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
             <span className="text-xs text-slate-400 font-mono">
               by {bounty.creator.slice(0, 6)}...{bounty.creator.slice(-4)}
             </span>
+            {isCreator && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                YOU
+              </span>
+            )}
           </div>
           <div>{getStatusBadge()}</div>
         </div>
@@ -185,29 +190,36 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
             <FileText className="h-4 w-4" />
           </button>
 
-          {/* Cancel button (if creator and still OPEN) */}
-          {isOpen && isCreator && (
-            <button
-              onClick={() => onCancel(bounty.bounty_id)}
-              disabled={isCancelling}
-              className="p-2 rounded-xl bg-rose-950/40 border border-rose-800/40 hover:bg-rose-900/50 text-rose-300 transition"
-              title="Cancel Bounty & Withdraw Escrow"
-            >
-              <XCircle className="h-4 w-4" />
-            </button>
-          )}
-
-          {/* Adjudicate Button (if OPEN) */}
+          {/* Actions if OPEN */}
           {isOpen && (
-            <button
-              onClick={() => onAdjudicate(bounty.bounty_id)}
-              disabled={isAdjudicating}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-md shadow-cyan-500/20 transition disabled:opacity-50"
-              title="Trigger Non-Deterministic Multi-Source Jury Cross-Check"
-            >
-              <Gavel className="h-3.5 w-3.5" />
-              <span>{isAdjudicating ? 'Jury Adjudicating...' : 'Trigger Jury'}</span>
-            </button>
+            <>
+              {isCreator ? (
+                <div className="flex items-center gap-2">
+                  <span className="hidden sm:inline text-[11px] text-amber-400/90 font-medium bg-amber-950/40 px-2 py-1 rounded-lg border border-amber-800/40">
+                    Awaiting 3rd-party juror
+                  </span>
+                  <button
+                    onClick={() => onCancel(bounty.bounty_id)}
+                    disabled={isCancelling}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-950/50 border border-rose-700/50 hover:bg-rose-900/60 text-rose-200 font-bold text-xs transition disabled:opacity-50"
+                    title="Cancel your bounty and withdraw your locked GEN escrow"
+                  >
+                    <XCircle className="h-3.5 w-3.5" />
+                    <span>{isCancelling ? 'Cancelling...' : 'Cancel & Refund'}</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => onAdjudicate(bounty.bounty_id)}
+                  disabled={isAdjudicating}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-md shadow-cyan-500/20 transition disabled:opacity-50"
+                  title="Join as independent DePIN juror to cross-check sources and earn escrow bounty"
+                >
+                  <Gavel className="h-3.5 w-3.5" />
+                  <span>{isAdjudicating ? 'Jury Adjudicating...' : 'Join & Adjudicate'}</span>
+                </button>
+              )}
+            </>
           )}
         </div>
 

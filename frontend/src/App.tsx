@@ -17,7 +17,7 @@ import {
 } from './config/genlayer';
 import { formatEther, parseEther, getAddress } from 'viem';
 import type { Address } from 'viem';
-import { Search, Filter, ShieldCheck, Sparkles, AlertCircle, CheckCircle2, Loader2, Info } from 'lucide-react';
+import { Search, Filter, ShieldCheck, Sparkles, AlertCircle, CheckCircle2, Loader2, Info, Users, Briefcase } from 'lucide-react';
 
 export function App() {
   // Wallet State
@@ -45,6 +45,7 @@ export function App() {
   // Filter & Search
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all'); // all, 0, 1, 2, 3, 4
+  const [roleFilter, setRoleFilter] = useState<'all' | 'available' | 'my_created'>('all');
 
   // Toast Notification
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
@@ -295,6 +296,12 @@ export function App() {
       return;
     }
 
+    const targetBounty = bounties.find((b) => b.bounty_id === bountyId);
+    if (targetBounty && targetBounty.creator.toLowerCase() === account.toLowerCase()) {
+      showToast('error', 'Permission Denied: Creator cannot adjudicate their own bounty. Only independent jurors can participate.');
+      return;
+    }
+
     try {
       setActiveAdjudicatingId(bountyId);
       showToast('info', `Triggering multi-source on-chain AI Jury for #${bountyId}...`);
@@ -330,6 +337,12 @@ export function App() {
   const handleCancel = async (bountyId: string) => {
     if (!account) return;
 
+    const targetBounty = bounties.find((b) => b.bounty_id === bountyId);
+    if (targetBounty && targetBounty.creator.toLowerCase() !== account.toLowerCase()) {
+      showToast('error', 'Permission Denied: Only the bounty creator can cancel this bounty.');
+      return;
+    }
+
     try {
       setActiveCancellingId(bountyId);
       showToast('info', `Cancelling bounty #${bountyId} and withdrawing escrow...`);
@@ -359,6 +372,15 @@ export function App() {
     }
   };
 
+  // Role Counts
+  const countAvailable = React.useMemo(() => {
+    return bounties.filter((b) => b.status === 0 && (!account || b.creator.toLowerCase() !== account.toLowerCase())).length;
+  }, [bounties, account]);
+
+  const countMyCreated = React.useMemo(() => {
+    return account ? bounties.filter((b) => b.creator.toLowerCase() === account.toLowerCase()).length : 0;
+  }, [bounties, account]);
+
   // Filtered bounties
   const filteredBounties = bounties.filter((b) => {
     const matchesSearch =
@@ -370,7 +392,14 @@ export function App() {
     const matchesStatus =
       statusFilter === 'all' || b.status.toString() === statusFilter;
 
-    return matchesSearch && matchesStatus;
+    let matchesRole = true;
+    if (roleFilter === 'available') {
+      matchesRole = b.status === 0 && (!account || b.creator.toLowerCase() !== account.toLowerCase());
+    } else if (roleFilter === 'my_created') {
+      matchesRole = Boolean(account && b.creator.toLowerCase() === account.toLowerCase());
+    }
+
+    return matchesSearch && matchesStatus && matchesRole;
   });
 
   return (
@@ -510,6 +539,54 @@ export function App() {
                 ))}
               </div>
             </div>
+          </div>
+
+          {/* Role & Access Filter Tabs */}
+          <div className="flex flex-wrap items-center gap-2 mb-6 p-1.5 bg-slate-900/90 rounded-2xl border border-slate-800 w-fit text-xs font-semibold shadow-inner">
+            <button
+              onClick={() => setRoleFilter('all')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition ${
+                roleFilter === 'all'
+                  ? 'bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/20'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Users className="h-3.5 w-3.5" />
+              <span>All Bounties</span>
+              <span className="ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-slate-800 text-slate-300">
+                {bounties.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setRoleFilter('available')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition ${
+                roleFilter === 'available'
+                  ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 font-bold shadow-md shadow-emerald-500/20'
+                  : 'text-slate-400 hover:text-emerald-300'
+              }`}
+            >
+              <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Available to Join & Earn</span>
+              <span className="ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/50 font-mono">
+                {countAvailable}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setRoleFilter('my_created')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition ${
+                roleFilter === 'my_created'
+                  ? 'bg-purple-600 text-white font-bold shadow-md shadow-purple-600/20'
+                  : 'text-slate-400 hover:text-purple-300'
+              }`}
+            >
+              <Briefcase className="h-3.5 w-3.5 text-purple-300" />
+              <span>My Created Bounties</span>
+              <span className="ml-1 px-1.5 py-0.5 text-[10px] rounded-full bg-purple-950 text-purple-300 border border-purple-700/50 font-mono">
+                {countMyCreated}
+              </span>
+            </button>
           </div>
 
           {/* Cards Grid */}

@@ -55,15 +55,15 @@ class Contract(gl.Contract):
         """
         bounty_val = bigint(gl.message.value)
         if bounty_val <= bigint(0):
-            raise gl.UserError("Bounty escrow amount must be greater than 0 GEN.")
+            raise Exception("Bounty escrow amount must be greater than 0 GEN.")
 
         if not claim or len(claim.strip()) == 0:
-            raise gl.UserError("Claim to be verified cannot be empty.")
+            raise Exception("Claim to be verified cannot be empty.")
 
         url_a = source_url_a.strip()
         url_b = source_url_b.strip()
         if not url_a.startswith("http") or not url_b.startswith("http"):
-            raise gl.UserError("Both source_url_a and source_url_b must be valid HTTP/HTTPS URLs.")
+            raise Exception("Both source_url_a and source_url_b must be valid HTTP/HTTPS URLs.")
 
         self.bounty_counter = self.bounty_counter + u64(1)
         bounty_id = f"truth-{int(self.bounty_counter)}"
@@ -98,11 +98,15 @@ class Contract(gl.Contract):
         Consensus verifies the final VERDICT (TRUE, FALSE, or UNVERIFIED).
         """
         if bounty_id not in self.bounties:
-            raise gl.UserError(f"Bounty {bounty_id} does not exist.")
+            raise Exception(f"Bounty {bounty_id} does not exist.")
 
         bounty = self.bounties[bounty_id]
         if bounty.status != u8(0):
-            raise gl.UserError(f"Bounty {bounty_id} is already resolved or closed.")
+            raise Exception(f"Bounty {bounty_id} is already resolved or closed.")
+
+        # Access Control: Creator cannot adjudicate their own bounty
+        if _addr_str(gl.message.sender_address).lower() == _addr_str(bounty.creator).lower():
+            raise Exception("Permission denied: Bounty creator cannot adjudicate their own bounty. Only independent third-party jurors can participate.")
 
         claim_text = bounty.claim
         url_a = bounty.source_url_a
@@ -261,14 +265,14 @@ Respond ONLY with a valid JSON object, without markdown formatting or code fence
         Allows the creator to cancel an OPEN bounty and withdraw escrowed funds.
         """
         if bounty_id not in self.bounties:
-            raise gl.UserError(f"Bounty {bounty_id} does not exist.")
+            raise Exception(f"Bounty {bounty_id} does not exist.")
 
         bounty = self.bounties[bounty_id]
         if gl.message.sender_address != bounty.creator:
-            raise gl.UserError("Only the bounty creator can cancel.")
+            raise Exception("Only the bounty creator can cancel.")
 
         if bounty.status != u8(0):
-            raise gl.UserError("Only OPEN bounties can be cancelled.")
+            raise Exception("Only OPEN bounties can be cancelled.")
 
         bounty.status = u8(4)  # CANCELLED
         bounty.verdict = "CANCELLED"
@@ -285,7 +289,7 @@ Respond ONLY with a valid JSON object, without markdown formatting or code fence
     def get_bounty(self, bounty_id: str) -> str:
         """Returns JSON serialized representation of a bounty."""
         if bounty_id not in self.bounties:
-            raise gl.UserError(f"Bounty {bounty_id} does not exist.")
+            raise Exception(f"Bounty {bounty_id} does not exist.")
 
         b = self.bounties[bounty_id]
         data = {
@@ -312,7 +316,7 @@ Respond ONLY with a valid JSON object, without markdown formatting or code fence
     @gl.public.view
     def get_bounty_id_by_index(self, idx: int) -> str:
         if idx < 0 or idx >= len(self.bounty_ids):
-            raise gl.UserError("Index out of bounds.")
+            raise Exception("Index out of bounds.")
         return self.bounty_ids[idx]
 
     @gl.public.view
