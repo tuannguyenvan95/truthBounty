@@ -577,36 +577,17 @@ export const ContractSettingsModal: React.FC<ContractSettingsModalProps> = ({
             </button>
           </form>
 
-          {/* Deploy New Contract Section */}
+          {/* Contract Status Section */}
           <div className="pt-4 border-t border-slate-800">
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                  Deploy Brand New Instance
-                </h4>
-                <p className="text-[11px] text-slate-400">
-                  Deploys TruthBounty to GenLayer Studionet with 1-click via MetaMask.
-                </p>
+            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
+              <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                Official Contract Active on Studionet
               </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                TruthBounty Dual-Sided Protection contract is live and deployed on GenLayer Studionet at <span className="font-mono text-cyan-300">0xA11e...b832</span>. No redeployment needed!
+              </p>
             </div>
-
-            <button
-              onClick={handleDeployNew}
-              disabled={isDeploying || !connectedAccount}
-              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 transition flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {isDeploying ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Deploying to Studionet...
-                </>
-              ) : (
-                <>
-                  <Rocket className="h-4 w-4" />
-                  Deploy New TruthBounty Contract
-                </>
-              )}
-            </button>
           </div>
 
           {/* Status / Error display */}
