@@ -95,17 +95,28 @@ const SEED_STATS_0XA11E: PlatformStats = {
 };
 
 const getCachedBounties = (addr: string): BountyItem[] => {
+  const map = new Map<string, BountyItem>();
+  if (addr.toLowerCase() === OFFICIAL_CONTRACT_ADDRESS.toLowerCase()) {
+    for (const b of SEED_BOUNTIES_0XA11E) {
+      map.set(b.bounty_id, b);
+    }
+  }
   try {
     const raw = localStorage.getItem(`tb_cache_bounties_${addr.toLowerCase()}`);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) {
+        for (const b of parsed) {
+          map.set(b.bounty_id, b);
+        }
+      }
     }
   } catch {}
-  if (addr.toLowerCase() === OFFICIAL_CONTRACT_ADDRESS.toLowerCase()) {
-    return SEED_BOUNTIES_0XA11E;
-  }
-  return [];
+  return Array.from(map.values()).sort((a, b) => {
+    const numA = parseInt(a.bounty_id.replace(/\D/g, '') || '0', 10);
+    const numB = parseInt(b.bounty_id.replace(/\D/g, '') || '0', 10);
+    return numB - numA;
+  });
 };
 
 const setCachedBounties = (addr: string, items: BountyItem[]) => {
@@ -323,6 +334,11 @@ export function App() {
       if (fetchedBounties.length > 0) {
         setBounties((prev) => {
           const map = new Map<string, BountyItem>();
+          if (contractAddress.toLowerCase() === OFFICIAL_CONTRACT_ADDRESS.toLowerCase()) {
+            for (const b of SEED_BOUNTIES_0XA11E) {
+              map.set(b.bounty_id, b);
+            }
+          }
           for (const b of prev) {
             map.set(b.bounty_id, b);
           }
