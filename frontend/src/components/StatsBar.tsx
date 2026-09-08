@@ -1,7 +1,6 @@
 import React from 'react';
 import { Layers, Lock, CheckCircle, Flame } from 'lucide-react';
-import { PlatformStats } from '../config/genlayer';
-import { formatEther } from 'viem';
+import { PlatformStats, formatGenAmount } from '../config/genlayer';
 
 interface StatsBarProps {
   stats: PlatformStats | null;
@@ -10,13 +9,8 @@ interface StatsBarProps {
 
 export const StatsBar: React.FC<StatsBarProps> = ({ stats, isLoading }) => {
   const formattedLockedGen = React.useMemo(() => {
-    if (!stats || !stats.total_bounty_locked) return '0.00';
-    try {
-      const val = BigInt(stats.total_bounty_locked);
-      return Number(formatEther(val)).toLocaleString(undefined, { maximumFractionDigits: 4 });
-    } catch {
-      return '0.00';
-    }
+    if (!stats || !stats.total_bounty_locked) return '0';
+    return formatGenAmount(stats.total_bounty_locked);
   }, [stats]);
 
   const cards = [

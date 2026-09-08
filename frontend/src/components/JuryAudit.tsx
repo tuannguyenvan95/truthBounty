@@ -1,7 +1,6 @@
 import React from 'react';
 import { X, Scale, ExternalLink, ShieldCheck, CheckCircle2, AlertOctagon, HelpCircle, Ban, Cpu, Globe, Database } from 'lucide-react';
-import { BountyItem, STUDIONET_EXPLORER_URL } from '../config/genlayer';
-import { formatEther } from 'viem';
+import { BountyItem, STUDIONET_EXPLORER_URL, formatGenAmount } from '../config/genlayer';
 
 interface JuryAuditProps {
   bounty: BountyItem | null;
@@ -16,14 +15,7 @@ export const JuryAudit: React.FC<JuryAuditProps> = ({
 }) => {
   if (!bounty) return null;
 
-  const formattedAmount = (() => {
-    try {
-      const val = BigInt(bounty.bounty_amount);
-      return Number(formatEther(val)).toFixed(4);
-    } catch {
-      return bounty.bounty_amount;
-    }
-  })();
+  const formattedAmount = formatGenAmount(bounty.bounty_amount);
 
   const renderVerdictBadge = () => {
     switch (bounty.status) {
@@ -185,7 +177,7 @@ export const JuryAudit: React.FC<JuryAuditProps> = ({
                 <span className="text-slate-400 font-semibold block mb-0.5">Juror Skin-in-the-Game:</span>
                 <span>
                   {bounty.juror_bond && BigInt(bounty.juror_bond) > 0n
-                    ? `Staked ${Number(formatEther(BigInt(bounty.juror_bond))).toFixed(4)} GEN bond (refunded upon valid resolution).`
+                    ? `Staked ${formatGenAmount(bounty.juror_bond)} GEN bond (refunded upon valid resolution).`
                     : 'Refundable juror bond protects against griefing & spam.'}
                 </span>
               </div>

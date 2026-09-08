@@ -1,7 +1,6 @@
 import React from 'react';
 import { ExternalLink, Gavel, XCircle, FileText, CheckCircle2, AlertOctagon, HelpCircle, Ban, ArrowUpRight, Scale } from 'lucide-react';
-import { BountyItem } from '../config/genlayer';
-import { formatEther } from 'viem';
+import { BountyItem, formatGenAmount } from '../config/genlayer';
 
 interface ClaimCardProps {
   bounty: BountyItem;
@@ -30,12 +29,7 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
   const isOpen = bounty.status === 0;
 
   const formattedAmount = React.useMemo(() => {
-    try {
-      const val = BigInt(bounty.bounty_amount);
-      return Number(formatEther(val)).toFixed(3);
-    } catch {
-      return bounty.bounty_amount;
-    }
+    return formatGenAmount(bounty.bounty_amount);
   }, [bounty.bounty_amount]);
 
   // Verdict style mapping

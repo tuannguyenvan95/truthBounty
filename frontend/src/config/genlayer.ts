@@ -1,5 +1,5 @@
 import { createClient, chains } from 'genlayer-js';
-import type { Address } from 'viem';
+import { type Address, formatEther } from 'viem';
 
 export const STUDIONET_CHAIN_ID = 61999;
 export const STUDIONET_CHAIN_ID_HEX = '0xf22f'; // 61999 in hex (0xf22f)
@@ -129,3 +129,33 @@ export interface PlatformStats {
   total_bounty_locked: string;
   total_claims_resolved: number;
 }
+
+/**
+ * Strips unnatural trailing zeros (e.g. 10.000 -> 10, 15.000 -> 15, 0.100 -> 0.1)
+ */
+export const formatGenAmount = (val: bigint | string | number | undefined | null): string => {
+  if (val === undefined || val === null || val === '') return '0';
+  try {
+    let num: number;
+    if (typeof val === 'bigint') {
+      num = Number(formatEther(val));
+    } else {
+      const strVal = String(val).trim();
+      if (strVal.includes('.')) {
+        num = parseFloat(strVal);
+      } else {
+        const big = BigInt(strVal);
+        if (big > 1000000000n) {
+          num = Number(formatEther(big));
+        } else {
+          num = Number(big);
+        }
+      }
+    }
+    if (isNaN(num)) return String(val);
+    return Number(num.toFixed(4)).toString();
+  } catch {
+    return String(val);
+  }
+};
+

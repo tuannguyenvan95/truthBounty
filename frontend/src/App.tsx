@@ -14,6 +14,7 @@ import {
   getGenLayerClient,
   switchToStudionet,
   getEthereumProvider,
+  formatGenAmount,
 } from './config/genlayer';
 import { formatEther, parseEther, getAddress } from 'viem';
 import type { Address } from 'viem';
@@ -22,7 +23,7 @@ import { Search, Filter, ShieldCheck, Sparkles, AlertCircle, CheckCircle2, Loade
 export function App() {
   // Wallet State
   const [account, setAccount] = useState<string | null>(null);
-  const [balance, setBalance] = useState<string>('0.00');
+  const [balance, setBalance] = useState<string>('0');
   const [chainId, setChainId] = useState<number | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
 
@@ -119,7 +120,7 @@ export function App() {
         params: [userAddr, 'latest'],
       });
       const balBigInt = BigInt(balHex);
-      setBalance(Number(formatEther(balBigInt)).toFixed(3));
+      setBalance(formatGenAmount(balBigInt));
     } catch (err) {
       console.warn('Could not fetch balance:', err);
     }
@@ -333,7 +334,7 @@ export function App() {
       }
 
       if (txValue > 0n) {
-        showToast('info', `Staking ${Number(formatEther(txValue)).toFixed(3)} GEN refundable bond & activating GenLayer AI Jury...`);
+        showToast('info', `Staking ${formatGenAmount(txValue)} GEN refundable bond & activating GenLayer AI Jury...`);
       } else {
         showToast('info', `Activating GenLayer on-chain AI Jury for #${bountyId}...`);
       }
@@ -396,7 +397,7 @@ export function App() {
       } catch {}
 
       const appealBondWei = 10000000000000000n; // 0.01 GEN appeal bond
-      showToast('info', `Filing on-chain appeal with ${Number(formatEther(appealBondWei)).toFixed(3)} GEN appeal bond...`);
+      showToast('info', `Filing on-chain appeal with ${formatGenAmount(appealBondWei)} GEN appeal bond...`);
 
       const txHash = await client.writeContract({
         address: contractChecksummed,
