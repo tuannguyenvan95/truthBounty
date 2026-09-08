@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { StatsBar } from './components/StatsBar';
 import { CreateClaim } from './components/CreateClaim';
@@ -126,71 +126,103 @@ export function App() {
     }
   }, []);
 
-  // Fetch on-chain data
+  const isFetchingRef = useRef(false);
+  const lastFetchTimeRef = useRef(0);
+
+  // Fetch on-chain data with parallel requests and non-destructive caching
   const fetchContractData = useCallback(async (isSilent = false) => {
     if (!contractAddress || contractAddress === '0x0000000000000000000000000000000000000000') {
       return;
     }
 
+    // Concurrency Lock: prevent multiple overlapping requests
+    if (isFetchingRef.current) {
+      return;
+    }
+
     try {
+      isFetchingRef.current = true;
       if (!isSilent) setIsRefreshing(true);
       const client = getGenLayerClient();
 
-      // 1. Fetch platform stats
-      try {
-        const rawStats = await client.readContract({
+      // 1. Fetch platform stats and bounty count in parallel
+      const [rawStatsRes, countRes] = await Promise.allSettled([
+        client.readContract({
           address: contractAddress as Address,
           functionName: 'get_stats',
           args: [],
-        });
-        if (typeof rawStats === 'string') {
-          setStats(JSON.parse(rawStats));
-        }
-      } catch (e) {
-        if (!isSilent) console.warn('get_stats failed:', e);
-      }
-
-      // 2. Fetch bounty count
-      let count = 0;
-      try {
-        const countRes = await client.readContract({
+        }),
+        client.readContract({
           address: contractAddress as Address,
           functionName: 'get_bounty_count',
           args: [],
-        });
-        count = Number(countRes);
-      } catch (e) {
-        if (!isSilent) console.warn('get_bounty_count failed:', e);
+        }),
+      ]);
+
+      if (rawStatsRes.status === 'fulfilled' && typeof rawStatsRes.value === 'string') {
+        try {
+          setStats(JSON.parse(rawStatsRes.value));
+        } catch {}
       }
 
-      // 3. Fetch each bounty
-      const items: BountyItem[] = [];
-      for (let i = count - 1; i >= 0; i--) {
-        try {
-          const id = await client.readContract({
-            address: contractAddress as Address,
-            functionName: 'get_bounty_id_by_index',
-            args: [i],
-          });
+      // If count retrieval failed due to transient network glitch, do NOT wipe out existing bounties!
+      if (countRes.status !== 'fulfilled') {
+        return;
+      }
 
-          const rawBounty = await client.readContract({
+      const count = Number(countRes.value);
+      if (count === 0) {
+        setBounties([]);
+        return;
+      }
+
+      // 2. Fetch all bounty IDs concurrently
+      const idPromises = Array.from({ length: count }, (_, idx) =>
+        client.readContract({
+          address: contractAddress as Address,
+          functionName: 'get_bounty_id_by_index',
+          args: [idx],
+        })
+      );
+      const idResults = await Promise.allSettled(idPromises);
+      const validIds: string[] = [];
+      for (const res of idResults) {
+        if (res.status === 'fulfilled' && typeof res.value === 'string') {
+          validIds.push(res.value);
+        }
+      }
+
+      // 3. Fetch each bounty details concurrently in parallel
+      const bountyPromises = validIds.map(async (id) => {
+        try {
+          const raw = await client.readContract({
             address: contractAddress as Address,
             functionName: 'get_bounty',
             args: [id],
           });
-
-          if (typeof rawBounty === 'string') {
-            items.push(JSON.parse(rawBounty));
+          if (typeof raw === 'string') {
+            return JSON.parse(raw) as BountyItem;
           }
         } catch (itemErr) {
-          if (!isSilent) console.warn(`Failed to fetch bounty at index ${i}:`, itemErr);
+          if (!isSilent) console.warn(`Failed to fetch bounty ${id}:`, itemErr);
         }
-      }
+        return null;
+      });
 
-      setBounties(items);
+      const fetchedBounties = (await Promise.all(bountyPromises)).filter(
+        (item): item is BountyItem => item !== null
+      );
+
+      // Safe update: only update if we retrieved items (never wipe state with empty array on transient RPC drops)
+      if (fetchedBounties.length > 0) {
+        fetchedBounties.reverse();
+        setBounties(fetchedBounties);
+      }
+      lastFetchTimeRef.current = Date.now();
     } catch (err: any) {
       if (!isSilent) console.error('Fetch error:', err);
     } finally {
+      isFetchingRef.current = false;
       if (!isSilent) setIsRefreshing(false);
       setIsLoading(false);
     }
@@ -241,20 +273,22 @@ export function App() {
     }
   }, [account, updateBalance]);
 
-  // Auto-polling interval: keeps multiple windows / tabs / devices synchronized every 4s
+  // Auto-polling interval: smooth 8s sync without spamming GenLayer RPC
   useEffect(() => {
     fetchContractData();
     const interval = setInterval(() => {
       fetchContractData(true);
-    }, 4000);
+    }, 8000);
     return () => clearInterval(interval);
   }, [fetchContractData]);
 
-  // Window focus & Cross-tab sync: instantly refetch when user switches windows or tabs
+  // Window focus & Cross-tab sync with debounce to prevent flickering
   useEffect(() => {
     const handleFocus = () => {
-      fetchContractData(true);
-      if (account) updateBalance(account);
+      if (Date.now() - lastFetchTimeRef.current > 3000) {
+        fetchContractData(true);
+        if (account) updateBalance(account);
+      }
     };
 
     const handleStorage = (e: StorageEvent) => {
