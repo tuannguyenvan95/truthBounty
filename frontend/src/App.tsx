@@ -583,8 +583,7 @@ export function App() {
       try {
         const schema = await client.getContractSchema(contractChecksummed);
         if (!schema?.methods?.challenge_verdict) {
-          showToast('error', 'Hợp đồng hiện tại (0xA11e) là bản deploy trước đó chưa có tính năng Kháng cáo on-chain. Mở Settings để deploy contract mới với 1-click.');
-          setIsSettingsOpen(true);
+          showToast('error', 'Hợp đồng này chưa hỗ trợ tính năng Kháng cáo on-chain.');
           setActiveChallengingId(null);
           return;
         }

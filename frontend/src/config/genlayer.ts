@@ -7,7 +7,7 @@ export const STUDIONET_RPC_URL = 'https://studio.genlayer.com/api';
 export const STUDIONET_EXPLORER_URL = 'https://studio.genlayer.com';
 
 // Official deployed TruthBounty contract on GenLayer Studionet
-export const OFFICIAL_CONTRACT_ADDRESS: `0x${string}` = '0xA11e61cc9Ee7EDB222Af3A3B6528dfAFc93bb832';
+export const OFFICIAL_CONTRACT_ADDRESS: `0x${string}` = '0xE8098316a21a3AA74590371ec7dA3f23c77ebAC4';
 
 export const STORAGE_KEY_CONTRACT_ADDRESS = 'truthbounty_contract_address';
 
@@ -16,6 +16,11 @@ export const STORAGE_KEY_CONTRACT_ADDRESS = 'truthbounty_contract_address';
  */
 export const getDefaultContractAddress = (): `0x${string}` => {
   const saved = localStorage.getItem(STORAGE_KEY_CONTRACT_ADDRESS);
+  // Auto-migrate from previous test address
+  if (saved && saved.toLowerCase() === '0xa11e61cc9ee7edb222af3a3b6528dfafc93bb832') {
+    localStorage.setItem(STORAGE_KEY_CONTRACT_ADDRESS, OFFICIAL_CONTRACT_ADDRESS);
+    return OFFICIAL_CONTRACT_ADDRESS;
+  }
   if (saved && saved.startsWith('0x') && saved.length === 42) {
     return saved as `0x${string}`;
   }

@@ -585,7 +585,7 @@ export const ContractSettingsModal: React.FC<ContractSettingsModalProps> = ({
                 Official Contract Active on Studionet
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                TruthBounty Dual-Sided Protection contract is live and deployed on GenLayer Studionet at <span className="font-mono text-cyan-300">0xA11e...b832</span>. No redeployment needed!
+                TruthBounty Dual-Sided Protection contract is live and deployed on GenLayer Studionet at <span className="font-mono text-cyan-300">0xE809...bAC4</span>. No redeployment needed!
               </p>
             </div>
           </div>
