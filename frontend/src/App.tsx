@@ -545,6 +545,23 @@ export function App() {
         account: { address: userChecksummed } as any,
       });
 
+      // Immediately broadcast lock across tabs so creator cannot cancel
+      const lockData = { juror: userChecksummed, time: Date.now() };
+      try {
+        localStorage.setItem(`tb_lock_${bountyId}`, JSON.stringify(lockData));
+        localStorage.setItem(`tb_lock_${contractChecksummed.toLowerCase()}_${bountyId}`, JSON.stringify(lockData));
+        localStorage.setItem('truthbounty_sync_ping', Date.now().toString());
+      } catch {}
+
+      // Optimistically update bounties in memory for instant feedback
+      setBounties((prev) =>
+        prev.map((b) =>
+          b.bounty_id === bountyId
+            ? { ...b, juror: userChecksummed, juror_bond: txValue.toString() }
+            : b
+        )
+      );
+
       showToast('info', `Transaction confirmed (${txHash.slice(0, 10)}...). Scraping sources & reaching consensus on GenLayer...`);
 
       const receipt = await client.waitForTransactionReceipt({ hash: txHash as any });
@@ -638,8 +655,21 @@ export function App() {
       return;
     }
 
+    // Local lock check as well (in case transaction is still pending finality)
+    let localLockJuror: string | null = null;
+    try {
+      const localLockRaw = localStorage.getItem(`tb_lock_${bountyId}`);
+      if (localLockRaw) {
+        const parsed = JSON.parse(localLockRaw);
+        if (Date.now() - (parsed.time || 0) < 30 * 60 * 1000) {
+          localLockJuror = parsed.juror;
+        }
+      }
+    } catch {}
+
     // Anti-quỵt check: Escrow locked once a 3rd-party juror has joined or staked bond
     const hasJuror = Boolean(
+      localLockJuror ||
       (targetBounty?.juror &&
         targetBounty.juror.toLowerCase() !== targetBounty.creator.toLowerCase() &&
         targetBounty.juror !== '0x0000000000000000000000000000000000000000' &&

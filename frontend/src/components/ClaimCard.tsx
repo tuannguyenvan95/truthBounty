@@ -27,7 +27,37 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
 }) => {
   const isCreator = currentAccount && bounty.creator.toLowerCase() === currentAccount.toLowerCase();
   const isOpen = bounty.status === 0;
+
+  const localLock = React.useMemo(() => {
+    try {
+      const raw = localStorage.getItem(`tb_lock_${bounty.bounty_id}`);
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (Date.now() - (data.time || 0) < 30 * 60 * 1000) return data;
+      }
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('tb_lock_') && key.endsWith(`_${bounty.bounty_id}`)) {
+          const data = JSON.parse(localStorage.getItem(key) || '{}');
+          if (Date.now() - (data.time || 0) < 30 * 60 * 1000) {
+            return data;
+          }
+        }
+      }
+    } catch {}
+    return null;
+  }, [bounty.bounty_id]);
+
+  const effectiveJuror = localLock?.juror || bounty.juror;
+  const isJuror = Boolean(
+    currentAccount &&
+    effectiveJuror &&
+    effectiveJuror.toLowerCase() === currentAccount.toLowerCase() &&
+    effectiveJuror.toLowerCase() !== bounty.creator.toLowerCase()
+  );
+
   const hasJurorJoined = Boolean(
+    localLock ||
     (bounty.juror &&
       bounty.juror.toLowerCase() !== bounty.creator.toLowerCase() &&
       bounty.juror !== '0x0000000000000000000000000000000000000000' &&
@@ -220,7 +250,7 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
                     title="A juror has joined and committed to adjudicating this bounty. Escrow is strictly locked to protect the juror against creator fraud/quỵt."
                   >
                     <Lock className="h-3.5 w-3.5 text-blue-400" />
-                    <span>Juror Evaluating ({bounty.juror?.slice(0, 6)}...) - Escrow Locked</span>
+                    <span>Juror Evaluating ({effectiveJuror?.slice(0, 6)}...) - Escrow Locked</span>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
@@ -241,12 +271,18 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
               ) : (
                 <button
                   onClick={() => onAdjudicate(bounty.bounty_id)}
-                  disabled={isAdjudicating}
+                  disabled={isAdjudicating || (hasJurorJoined && isJuror)}
                   className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-md shadow-cyan-500/20 transition disabled:opacity-50"
                   title="Join as independent DePIN juror (refundable bond required for skin-in-the-game)"
                 >
                   <Gavel className="h-3.5 w-3.5" />
-                  <span>{isAdjudicating ? 'Jury Adjudicating...' : 'Join as Juror'}</span>
+                  <span>
+                    {isAdjudicating
+                      ? 'Jury Adjudicating...'
+                      : hasJurorJoined && isJuror
+                      ? '⏳ Evaluating Consensus...'
+                      : 'Join as Juror'}
+                  </span>
                 </button>
               )}
             </>
