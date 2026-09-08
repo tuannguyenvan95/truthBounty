@@ -212,3 +212,105 @@ def test_creator_cannot_adjudicate_own_bounty(direct_vm, direct_deploy, direct_a
     with pytest.raises(Exception, match="Bounty creator cannot adjudicate"):
         contract.adjudicate(bounty_id)
 
+
+def test_juror_bond_and_evidence_quotes(direct_vm, direct_deploy, direct_alice, direct_bob, sim_install_mocks):
+    """Test that juror deposits a bond and evidence quotes from both sources are stored."""
+    contract = direct_deploy(str(CONTRACT_PATH))
+
+    direct_vm.sender = direct_alice
+    direct_vm.value = 1000000000000000000  # 1 GEN
+    bounty_id = contract.create_bounty(
+        claim="Scientists announce breakthrough in room-temperature superconductor",
+        source_url_a="https://nature.example/superconductor-paper",
+        source_url_b="https://science.example/peer-review",
+    )
+
+    mock_web = {
+        "https://nature.example/superconductor-paper": {
+            "method": "GET",
+            "status": 200,
+            "body": "Nature reports that replication attempts failed to show zero resistance at room temperature.",
+        },
+        "https://science.example/peer-review": {
+            "method": "GET",
+            "status": 200,
+            "body": "Independent labs across 3 continents confirm the material is a standard ferromagnet, debunking the claim.",
+        },
+    }
+
+    llm_resp = json.dumps({
+        "verdict": "FALSE",
+        "confidence": 99,
+        "evidence_score": 96,
+        "evidence_quote_a": "Replication attempts failed to show zero resistance.",
+        "evidence_quote_b": "Independent labs confirm the material is a standard ferromagnet.",
+        "reason": "Both Nature and Science prove the claim of room-temperature superconductor is false.",
+    })
+    mock_llm = {
+        r".*superconductor.*": llm_resp,
+    }
+
+    sim_install_mocks(direct_vm, mock_web=mock_web, mock_llm=mock_llm)
+
+    # Bob joins and adjudicates with 0.1 GEN Juror Bond
+    direct_vm.sender = direct_bob
+    direct_vm.value = 100000000000000000  # 0.1 GEN bond
+    contract.join_and_adjudicate(bounty_id)
+
+    bounty = json.loads(contract.get_bounty(bounty_id))
+    assert bounty["status"] == 2  # RESOLVED_FALSE
+    assert bounty["verdict"] == "FALSE"
+    assert "Replication attempts failed" in bounty["evidence_quote_a"]
+    assert "Independent labs confirm" in bounty["evidence_quote_b"]
+    assert bounty["juror_bond"] == "100000000000000000"
+
+    # Anti-griefing check: Creator cannot cancel after adjudication
+    direct_vm.sender = direct_alice
+    with pytest.raises(Exception, match="no longer OPEN"):
+        contract.cancel_bounty(bounty_id)
+
+
+def test_challenge_appeal_flow(direct_vm, direct_deploy, direct_alice, direct_bob, sim_install_mocks):
+    """Test challenging a resolved verdict to open an appeal court window."""
+    contract = direct_deploy(str(CONTRACT_PATH))
+
+    direct_vm.sender = direct_alice
+    direct_vm.value = 1000000000000000000
+    bounty_id = contract.create_bounty(
+        claim="Local government approves new transit tax",
+        source_url_a="https://citynews.example/transit",
+        source_url_b="https://civic.example/vote",
+    )
+
+    sim_install_mocks(
+        direct_vm,
+        mock_web={
+            "https://citynews.example/transit": {"method": "GET", "status": 200, "body": "Council passed bill."},
+            "https://civic.example/vote": {"method": "GET", "status": 200, "body": "Vote was 7-2 in favour."},
+        },
+        mock_llm={
+            r".*transit.*": json.dumps({
+                "verdict": "TRUE",
+                "confidence": 90,
+                "evidence_score": 85,
+                "reason": "Bill confirmed passed.",
+            })
+        }
+    )
+
+    direct_vm.sender = direct_bob
+    direct_vm.value = 50000000000000000
+    contract.join_and_adjudicate(bounty_id)
+
+    # Alice disputes the verdict and files an appeal
+    direct_vm.sender = direct_alice
+    direct_vm.value = 50000000000000000
+    contract.challenge_verdict(bounty_id, "Evidence from Source A is outdated; mayor vetoed the bill yesterday.")
+
+    bounty = json.loads(contract.get_bounty(bounty_id))
+    assert bounty["status"] == 5  # IN_APPEAL
+    assert bounty["verdict"] == "IN_APPEAL"
+    assert bounty["appeal_count"] == 1
+    assert "mayor vetoed" in bounty["dispute_reason"]
+
+

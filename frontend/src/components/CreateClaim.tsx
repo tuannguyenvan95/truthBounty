@@ -236,6 +236,17 @@ export const CreateClaim: React.FC<CreateClaimProps> = ({
               </div>
             </div>
 
+            {/* Dual-Sided Protection Guarantee Notice */}
+            <div className="p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/20 text-xs text-slate-300 flex items-start gap-2.5">
+              <Sparkles className="h-4 w-4 text-cyan-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-cyan-300">Dual-Sided Escrow Guarantee:</span>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Your escrow is 100% refunded if web sources are unreachable or inconclusive (`UNVERIFIED`). You retain full right to cancel prior to juror adjudication, and may file a formal appeal if a verdict is disputed.
+                </p>
+              </div>
+            </div>
+
             {/* Error Message */}
             {error && (
               <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">

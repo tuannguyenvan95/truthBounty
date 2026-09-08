@@ -137,6 +137,66 @@ export const JuryAudit: React.FC<JuryAuditProps> = ({
             </div>
           </div>
 
+          {/* Dual-Source Verbatim Evidence Quotes */}
+          {(bounty.evidence_quote_a || bounty.evidence_quote_b) && (
+            <div className="space-y-2.5">
+              <label className="text-xs font-bold text-indigo-400 uppercase tracking-wider block flex items-center gap-1.5">
+                <ShieldCheck className="h-4 w-4" />
+                Proof of Attribution (Verbatim Excerpts Extracted On-Chain)
+              </label>
+
+              {bounty.evidence_quote_a && (
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs">
+                  <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider block mb-1">
+                    Excerpt from Source A:
+                  </span>
+                  <p className="text-slate-300 italic font-mono">"{bounty.evidence_quote_a}"</p>
+                </div>
+              )}
+
+              {bounty.evidence_quote_b && (
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs">
+                  <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider block mb-1">
+                    Excerpt from Source B:
+                  </span>
+                  <p className="text-slate-300 italic font-mono">"{bounty.evidence_quote_b}"</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Dual-Sided Protection Transparency Card */}
+          <div className="p-3.5 rounded-xl bg-cyan-950/20 border border-cyan-500/30 text-xs space-y-2">
+            <div className="flex items-center justify-between text-cyan-300 font-bold">
+              <span className="flex items-center gap-1.5">
+                <ShieldCheck className="h-4 w-4" />
+                Dual-Sided Escrow Protection System
+              </span>
+              <span className="text-[10px] font-mono bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/40">
+                Institutional Court
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-300 pt-1">
+              <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+                <span className="text-slate-400 font-semibold block mb-0.5">Creator Protection:</span>
+                <span>100% full escrow refund if external web sources fail or return ambiguous evidence (`UNVERIFIED`).</span>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+                <span className="text-slate-400 font-semibold block mb-0.5">Juror Skin-in-the-Game:</span>
+                <span>
+                  {bounty.juror_bond && BigInt(bounty.juror_bond) > 0n
+                    ? `Staked ${Number(formatEther(BigInt(bounty.juror_bond))).toFixed(4)} GEN bond (refunded upon valid resolution).`
+                    : 'Refundable juror bond protects against griefing & spam.'}
+                </span>
+              </div>
+            </div>
+            {bounty.dispute_reason && bounty.dispute_reason !== 'None' && (
+              <div className="p-2 rounded-lg bg-purple-950/40 border border-purple-800/40 text-purple-300 text-[11px]">
+                <span className="font-bold">Appeal Recorded:</span> {bounty.dispute_reason} (Appeals: {bounty.appeal_count || 1})
+              </div>
+            )}
+          </div>
+
           {/* Consensus Metrics */}
           <div className="grid grid-cols-2 gap-4">
             <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800">

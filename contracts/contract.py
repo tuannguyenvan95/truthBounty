@@ -15,18 +15,27 @@ def _addr_str(addr: Address) -> str:
 @allow_storage
 @dataclass
 class Bounty:
-    """Storage struct representing a multi-source fact-checking bounty."""
+    """
+    Storage struct representing a multi-source fact-checking bounty
+    with institutional Dual-Sided Protection.
+    """
     bounty_id: str
     creator: Address
     bounty_amount: bigint
     claim: str                     # The statement/news headline to verify
     source_url_a: str              # Primary news source URL
     source_url_b: str              # Independent corroborating source URL
-    status: u8                     # 0: OPEN, 1: RESOLVED_TRUE, 2: RESOLVED_FALSE, 3: UNVERIFIED, 4: CANCELLED
-    verdict: str                   # "PENDING", "TRUE", "FALSE", "UNVERIFIED"
-    reason: str                    # Detailed multi-source corroboration breakdown
+    status: u8                     # 0: OPEN, 1: RESOLVED_TRUE, 2: RESOLVED_FALSE, 3: UNVERIFIED, 4: CANCELLED, 5: IN_APPEAL
+    verdict: str                   # "PENDING", "TRUE", "FALSE", "UNVERIFIED", "CANCELLED", "IN_APPEAL"
+    reason: str                    # Multi-source corroboration breakdown
     confidence: u8                 # 0 - 100: Validator consensus confidence
     evidence_score: u8             # 0 - 100: Source reliability and alignment score
+    evidence_quote_a: str          # Verbatim or summarized key evidence quote from Source A
+    evidence_quote_b: str          # Verbatim or summarized key evidence quote from Source B
+    juror: Address                 # Resolver / Juror who adjudicated
+    juror_bond: bigint             # Staked collateral for skin-in-the-game
+    appeal_count: u8               # Count of appeals requested
+    dispute_reason: str            # Reason recorded if an appeal was filed
     created_at_block: u256
 
 
@@ -34,6 +43,7 @@ class Contract(gl.Contract):
     """
     TruthBounty: Multi-Source Autonomous Fact-Checking & Attribution Court
     Target Network: studionet (Chain ID: 61999)
+    Features Dual-Sided Protection (Creator Escrow Safety + Juror Bond & Anti-Griefing).
     """
     bounties: TreeMap[str, Bounty]
     bounty_ids: DynArray[str]
@@ -78,9 +88,15 @@ class Contract(gl.Contract):
             source_url_b=url_b,
             status=u8(0),  # OPEN
             verdict="PENDING",
-            reason="Awaiting multi-source on-chain AI jury adjudication.",
+            reason="Awaiting independent DePIN juror and multi-source AI consensus.",
             confidence=u8(0),
             evidence_score=u8(0),
+            evidence_quote_a="Pending juror retrieval.",
+            evidence_quote_b="Pending juror retrieval.",
+            juror=gl.message.sender_address,  # Default placeholder
+            juror_bond=bigint(0),
+            appeal_count=u8(0),
+            dispute_reason="None",
             created_at_block=current_block,
         )
 
@@ -90,23 +106,36 @@ class Contract(gl.Contract):
 
         return bounty_id
 
-    @gl.public.write
-    def adjudicate(self, bounty_id: str) -> None:
+    @gl.public.write.payable
+    def join_and_adjudicate(self, bounty_id: str) -> None:
         """
-        Executes non-deterministic multi-source cross-reference fact-checking.
-        Fetches both web sources directly on-chain and prompts LLM jury.
-        Consensus verifies the final VERDICT (TRUE, FALSE, or UNVERIFIED).
+        Dual-Sided Protection Adjudication:
+        1. Access Control: Creator CANNOT adjudicate their own bounty.
+        2. Juror Bond: Resolver deposits a refundable bond (skin-in-the-game).
+        3. Anti-Griefing: Once adjudication starts, Creator cannot cancel.
+        4. Multi-Source Web Scraping: Live render of Source A & Source B via gl.nondet.web.render.
+        5. Semantic Consensus: GenVM validators verify the VERDICT.
+        6. Dual Protection Escrow Settlement:
+           - TRUE/FALSE: Juror receives Bounty + 100% Bond refund.
+           - UNVERIFIED: Creator receives 100% Escrow refund; Juror receives 100% Bond refund.
         """
         if bounty_id not in self.bounties:
             raise Exception(f"Bounty {bounty_id} does not exist.")
 
         bounty = self.bounties[bounty_id]
-        if bounty.status != u8(0):
-            raise Exception(f"Bounty {bounty_id} is already resolved or closed.")
+        if bounty.status != u8(0) and bounty.status != u8(5):
+            raise Exception(f"Bounty {bounty_id} is not open for adjudication (current status: {bounty.status}).")
 
-        # Access Control: Creator cannot adjudicate their own bounty
-        if _addr_str(gl.message.sender_address).lower() == _addr_str(bounty.creator).lower():
+        # Protection 1: Creator cannot adjudicate or self-farm own bounty
+        caller_str = _addr_str(gl.message.sender_address).lower()
+        creator_str = _addr_str(bounty.creator).lower()
+        if caller_str == creator_str:
             raise Exception("Permission denied: Bounty creator cannot adjudicate their own bounty. Only independent third-party jurors can participate.")
+
+        # Protection 2: Juror Skin-in-the-Game
+        bond_val = bigint(gl.message.value)
+        bounty.juror = gl.message.sender_address
+        bounty.juror_bond = bond_val
 
         claim_text = bounty.claim
         url_a = bounty.source_url_a
@@ -129,12 +158,14 @@ class Contract(gl.Contract):
             except Exception:
                 err_b = True
 
-            # Defensive fallback if both sources fail
+            # Defensive fallback if both sources fail or are blocked
             if (err_a and err_b) or (not content_a and not content_b):
                 return {
                     "verdict": "UNVERIFIED",
                     "confidence": 100,
                     "evidence_score": 0,
+                    "evidence_quote_a": "Source A unreachable or blocked by anti-bot.",
+                    "evidence_quote_b": "Source B unreachable or blocked by anti-bot.",
                     "reason": "Both external web sources could not be reached or returned empty diffs."
                 }
 
@@ -143,10 +174,10 @@ class Contract(gl.Contract):
             clean_b = content_b[:4000] if content_b else "Source B unreachable."
 
             prompt = f"""You are an on-chain Fact-Checking Juror on GenLayer.
-Evaluate the validity of the following CLAIM by cross-referencing EVIDENCE extracted live from two web sources.
+Evaluate the validity of the following CLAIM by cross-referencing EVIDENCE extracted live from two independent web sources.
 
 CLAIM TO VERIFY:
-\"{claim_text}\"
+"{claim_text}"
 
 EVIDENCE FROM SOURCE A ({url_a}):
 {clean_a}
@@ -159,13 +190,16 @@ INSTRUCTIONS:
 2. If evidence clearly confirms the claim, verdict is "TRUE".
 3. If evidence refutes the claim or shows it is fabricated/debunked, verdict is "FALSE".
 4. If sources conflict, are inaccessible, or fail to mention the claim, verdict is "UNVERIFIED".
-5. Compute an evidence_score (0-100) reflecting source agreement and evidence strength.
+5. Extract key excerpt/quote from Source A as "evidence_quote_a" and from Source B as "evidence_quote_b".
+6. Compute confidence (0-100) and evidence_score (0-100).
 
 Respond ONLY with a valid JSON object, without markdown formatting or code fences:
 {{
   "verdict": "TRUE"|"FALSE"|"UNVERIFIED",
   "confidence": <0-100>,
   "evidence_score": <0-100>,
+  "evidence_quote_a": "<key evidence quote from Source A>",
+  "evidence_quote_b": "<key evidence quote from Source B>",
   "reason": "<clear explanation of multi-source corroboration>"
 }}"""
 
@@ -176,11 +210,12 @@ Respond ONLY with a valid JSON object, without markdown formatting or code fence
                 parsed = raw_res
             elif isinstance(raw_res, str):
                 cleaned = raw_res.strip()
-                if cleaned.startswith("```json"):
+                tick3 = chr(96) * 3
+                if cleaned.startswith(tick3 + "json"):
                     cleaned = cleaned[7:]
-                elif cleaned.startswith("```"):
+                elif cleaned.startswith(tick3):
                     cleaned = cleaned[3:]
-                if cleaned.endswith("```"):
+                if cleaned.endswith(tick3):
                     cleaned = cleaned[:-3]
                 cleaned = cleaned.strip()
                 try:
@@ -193,6 +228,8 @@ Respond ONLY with a valid JSON object, without markdown formatting or code fence
                     "verdict": "UNVERIFIED",
                     "confidence": 50,
                     "evidence_score": 0,
+                    "evidence_quote_a": "Parsing failed.",
+                    "evidence_quote_b": "Parsing failed.",
                     "reason": "Failed to parse consensus validator output."
                 }
 
@@ -210,11 +247,15 @@ Respond ONLY with a valid JSON object, without markdown formatting or code fence
             conf_val = _clean_num(parsed.get("confidence"), 80)
             score_val = _clean_num(parsed.get("evidence_score"), 75 if verdict_str in ("TRUE", "FALSE") else 20)
             reason_str = str(parsed.get("reason", "Multi-source consensus rendered."))
+            quote_a = str(parsed.get("evidence_quote_a", "Evidence identified in Source A."))[:500]
+            quote_b = str(parsed.get("evidence_quote_b", "Evidence identified in Source B."))[:500]
 
             return {
                 "verdict": verdict_str,
                 "confidence": conf_val,
                 "evidence_score": score_val,
+                "evidence_quote_a": quote_a,
+                "evidence_quote_b": quote_b,
                 "reason": reason_str
             }
 
@@ -235,34 +276,73 @@ Respond ONLY with a valid JSON object, without markdown formatting or code fence
         reason = adjudication_res["reason"]
         confidence = u8(int(adjudication_res["confidence"]))
         evidence_score = u8(int(adjudication_res["evidence_score"]))
+        quote_a = str(adjudication_res.get("evidence_quote_a", "Verified in Source A."))
+        quote_b = str(adjudication_res.get("evidence_quote_b", "Verified in Source B."))
 
         bounty.verdict = verdict
         bounty.reason = reason
         bounty.confidence = confidence
         bounty.evidence_score = evidence_score
+        bounty.evidence_quote_a = quote_a
+        bounty.evidence_quote_b = quote_b
 
         bounty_val = bounty.bounty_amount
+        juror_bond_val = bounty.juror_bond
         self.total_bounty_locked = self.total_bounty_locked - bounty_val
         self.total_claims_resolved = self.total_claims_resolved + u32(1)
 
-        # Update status and distribute funds
+        # Protection 3: Safe Dual Distribution
         if verdict == "TRUE":
             bounty.status = u8(1)  # RESOLVED_TRUE
-            # Reward resolver / caller for triggering valid verification
-            gl.get_contract_at(gl.message.sender_address).emit_transfer(value=u256(int(bounty_val)))
+            # Juror receives bounty reward + 100% refund of their staked bond
+            total_payout = u256(int(bounty_val + juror_bond_val))
+            gl.get_contract_at(bounty.juror).emit_transfer(value=total_payout)
         elif verdict == "FALSE":
             bounty.status = u8(2)  # RESOLVED_FALSE
-            # Reward caller for successfully debunking
-            gl.get_contract_at(gl.message.sender_address).emit_transfer(value=u256(int(bounty_val)))
+            # Juror receives bounty reward + 100% refund of their staked bond
+            total_payout = u256(int(bounty_val + juror_bond_val))
+            gl.get_contract_at(bounty.juror).emit_transfer(value=total_payout)
         else:
             bounty.status = u8(3)  # UNVERIFIED
-            # Refund escrowed amount back to creator
+            # Creator Protection: 100% Escrow refund to creator
             gl.get_contract_at(bounty.creator).emit_transfer(value=u256(int(bounty_val)))
+            # Juror Protection: 100% Bond refund to juror
+            if juror_bond_val > bigint(0):
+                gl.get_contract_at(bounty.juror).emit_transfer(value=u256(int(juror_bond_val)))
+
+    @gl.public.write.payable
+    def adjudicate(self, bounty_id: str) -> None:
+        """Alias for join_and_adjudicate for backward compatibility."""
+        self.join_and_adjudicate(bounty_id)
+
+    @gl.public.write.payable
+    def challenge_verdict(self, bounty_id: str, dispute_reason: str) -> None:
+        """
+        Protection 4: Appeal / Dispute Court.
+        Allows either party to file a formal challenge on a resolved claim.
+        Records dispute reason and updates status to IN_APPEAL.
+        """
+        if bounty_id not in self.bounties:
+            raise Exception(f"Bounty {bounty_id} does not exist.")
+
+        bounty = self.bounties[bounty_id]
+        if bounty.status not in (u8(1), u8(2), u8(3)):
+            raise Exception("Only completed or unverified bounties can be appealed.")
+
+        if bounty.appeal_count >= u8(2):
+            raise Exception("Maximum appeal limit reached for this bounty.")
+
+        bounty.appeal_count = bounty.appeal_count + u8(1)
+        bounty.dispute_reason = dispute_reason.strip() if dispute_reason else "Appeal requested by party."
+        bounty.status = u8(5)  # IN_APPEAL
+        bounty.verdict = "IN_APPEAL"
+        bounty.reason = f"Appeal #{int(bounty.appeal_count)}: {bounty.dispute_reason}"
 
     @gl.public.write
     def cancel_bounty(self, bounty_id: str) -> None:
         """
         Allows the creator to cancel an OPEN bounty and withdraw escrowed funds.
+        Anti-griefing lock: Cannot cancel once adjudication has started or finished.
         """
         if bounty_id not in self.bounties:
             raise Exception(f"Bounty {bounty_id} does not exist.")
@@ -272,7 +352,7 @@ Respond ONLY with a valid JSON object, without markdown formatting or code fence
             raise Exception("Only the bounty creator can cancel.")
 
         if bounty.status != u8(0):
-            raise Exception("Only OPEN bounties can be cancelled.")
+            raise Exception("Cannot cancel: Bounty is no longer OPEN.")
 
         bounty.status = u8(4)  # CANCELLED
         bounty.verdict = "CANCELLED"
@@ -287,7 +367,7 @@ Respond ONLY with a valid JSON object, without markdown formatting or code fence
 
     @gl.public.view
     def get_bounty(self, bounty_id: str) -> str:
-        """Returns JSON serialized representation of a bounty."""
+        """Returns JSON serialized representation of a bounty with dual-sided protection metadata."""
         if bounty_id not in self.bounties:
             raise Exception(f"Bounty {bounty_id} does not exist.")
 
@@ -304,13 +384,18 @@ Respond ONLY with a valid JSON object, without markdown formatting or code fence
             "reason": b.reason,
             "confidence": int(b.confidence),
             "evidence_score": int(b.evidence_score),
-            "created_at_block": str(b.created_at_block),
+            "evidence_quote_a": b.evidence_quote_a,
+            "evidence_quote_b": b.evidence_quote_b,
+            "juror": _addr_str(b.juror),
+            "juror_bond": str(b.juror_bond),
+            "appeal_count": int(b.appeal_count),
+            "dispute_reason": b.dispute_reason,
+            "created_at_block": int(b.created_at_block),
         }
         return json.dumps(data)
 
     @gl.public.view
     def get_bounty_count(self) -> int:
-        """Returns the total count of registered bounties."""
         return len(self.bounty_ids)
 
     @gl.public.view
@@ -321,7 +406,6 @@ Respond ONLY with a valid JSON object, without markdown formatting or code fence
 
     @gl.public.view
     def get_stats(self) -> str:
-        """Returns platform aggregate statistics."""
         data = {
             "total_bounties": len(self.bounty_ids),
             "total_bounty_locked": str(self.total_bounty_locked),

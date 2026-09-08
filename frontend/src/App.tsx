@@ -40,6 +40,7 @@ export function App() {
   const [isSubmittingClaim, setIsSubmittingClaim] = useState(false);
   const [activeAdjudicatingId, setActiveAdjudicatingId] = useState<string | null>(null);
   const [activeCancellingId, setActiveCancellingId] = useState<string | null>(null);
+  const [activeChallengingId, setActiveChallengingId] = useState<string | null>(null);
   const [selectedAuditBounty, setSelectedAuditBounty] = useState<BountyItem | null>(null);
 
   // Filter & Search
@@ -304,7 +305,18 @@ export function App() {
 
     try {
       setActiveAdjudicatingId(bountyId);
-      showToast('info', `Triggering multi-source on-chain AI Jury for #${bountyId}...`);
+
+      // Dual-Sided Protection: Calculate 5% refundable juror bond
+      let jurorBondWei = 5000000000000000n; // 0.005 GEN default
+      if (targetBounty) {
+        try {
+          const rawBountyVal = BigInt(targetBounty.bounty_amount);
+          const computed5Percent = rawBountyVal / 20n;
+          if (computed5Percent > jurorBondWei) jurorBondWei = computed5Percent;
+        } catch {}
+      }
+
+      showToast('info', `Staking ${Number(formatEther(jurorBondWei)).toFixed(3)} GEN refundable bond & activating GenLayer AI Jury...`);
 
       const client = getGenLayerClient();
       const userChecksummed = getAddress(account);
@@ -312,9 +324,9 @@ export function App() {
 
       const txHash = await client.writeContract({
         address: contractChecksummed,
-        functionName: 'adjudicate',
+        functionName: 'join_and_adjudicate',
         args: [bountyId],
-        value: 0n,
+        value: jurorBondWei,
         account: { address: userChecksummed } as any,
       });
 
@@ -330,6 +342,51 @@ export function App() {
       showToast('error', err?.message || 'Failed to adjudicate bounty.');
     } finally {
       setActiveAdjudicatingId(null);
+    }
+  };
+
+  // Challenge / Appeal Handler
+  const handleChallenge = async (bountyId: string) => {
+    if (!account) {
+      showToast('error', 'Connect MetaMask to file an appeal challenge.');
+      return;
+    }
+
+    const appealPrompt = window.prompt(
+      'Enter reason for appealing this verdict to the GenLayer High Court:',
+      'Dispute verdict: external web sources were ambiguous or contradictory.'
+    );
+    if (!appealPrompt || !appealPrompt.trim()) return;
+
+    try {
+      setActiveChallengingId(bountyId);
+      const appealBondWei = 10000000000000000n; // 0.01 GEN appeal bond
+      showToast('info', `Filing on-chain appeal with ${Number(formatEther(appealBondWei)).toFixed(3)} GEN appeal bond...`);
+
+      const client = getGenLayerClient();
+      const userChecksummed = getAddress(account);
+      const contractChecksummed = getAddress(contractAddress);
+
+      const txHash = await client.writeContract({
+        address: contractChecksummed,
+        functionName: 'challenge_verdict',
+        args: [bountyId, appealPrompt.trim()],
+        value: appealBondWei,
+        account: { address: userChecksummed } as any,
+      });
+
+      showToast('info', `Appeal transaction submitted (${txHash.slice(0, 10)}...). Escalating case...`);
+
+      await client.waitForTransactionReceipt({ hash: txHash as any });
+
+      showToast('success', `Appeal recorded on-chain! Case escalated to High Court.`);
+      await fetchContractData();
+      if (account) updateBalance(account);
+    } catch (err: any) {
+      console.error('Challenge failed:', err);
+      showToast('error', err?.message || 'Failed to file appeal.');
+    } finally {
+      setActiveChallengingId(null);
     }
   };
 
@@ -599,9 +656,11 @@ export function App() {
                   currentAccount={account}
                   onAdjudicate={handleAdjudicate}
                   onCancel={handleCancel}
+                  onChallenge={handleChallenge}
                   onOpenAudit={(b) => setSelectedAuditBounty(b)}
                   isAdjudicating={activeAdjudicatingId === bounty.bounty_id}
                   isCancelling={activeCancellingId === bounty.bounty_id}
+                  isChallenging={activeChallengingId === bounty.bounty_id}
                 />
               ))}
             </div>

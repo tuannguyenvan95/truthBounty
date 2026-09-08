@@ -110,12 +110,18 @@ export interface BountyItem {
   claim: string;
   source_url_a: string;
   source_url_b: string;
-  status: number; // 0: OPEN, 1: RESOLVED_TRUE, 2: RESOLVED_FALSE, 3: UNVERIFIED, 4: CANCELLED
-  verdict: string; // "PENDING", "TRUE", "FALSE", "UNVERIFIED", "CANCELLED"
+  status: number; // 0: OPEN, 1: RESOLVED_TRUE, 2: RESOLVED_FALSE, 3: UNVERIFIED, 4: CANCELLED, 5: IN_APPEAL
+  verdict: string; // "PENDING", "TRUE", "FALSE", "UNVERIFIED", "CANCELLED", "IN_APPEAL"
   reason: string;
   confidence: number;
   evidence_score: number;
-  created_at_block: string;
+  evidence_quote_a?: string;
+  evidence_quote_b?: string;
+  juror?: string;
+  juror_bond?: string;
+  appeal_count?: number;
+  dispute_reason?: string;
+  created_at_block: string | number;
 }
 
 export interface PlatformStats {

@@ -8,9 +8,11 @@ interface ClaimCardProps {
   currentAccount: string | null;
   onAdjudicate: (bountyId: string) => Promise<void>;
   onCancel: (bountyId: string) => Promise<void>;
+  onChallenge?: (bountyId: string) => Promise<void>;
   onOpenAudit: (bounty: BountyItem) => void;
   isAdjudicating: boolean;
   isCancelling: boolean;
+  isChallenging?: boolean;
 }
 
 export const ClaimCard: React.FC<ClaimCardProps> = ({
@@ -18,9 +20,11 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
   currentAccount,
   onAdjudicate,
   onCancel,
+  onChallenge,
   onOpenAudit,
   isAdjudicating,
   isCancelling,
+  isChallenging = false,
 }) => {
   const isCreator = currentAccount && bounty.creator.toLowerCase() === currentAccount.toLowerCase();
   const isOpen = bounty.status === 0;
@@ -70,6 +74,13 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-700/50 text-slate-400 border border-slate-600">
             <Ban className="h-3.5 w-3.5" />
             CANCELLED
+          </span>
+        );
+      case 5: // IN_APPEAL
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-purple-500/10 text-purple-400 border border-purple-500/30">
+            <Scale className="h-3.5 w-3.5 animate-pulse" />
+            UNDER APPEAL
           </span>
         );
       default:
@@ -167,6 +178,13 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
             </div>
           </div>
         )}
+        {/* Verbatim quote preview if resolved */}
+        {bounty.evidence_quote_a && bounty.evidence_quote_a !== 'Pending juror retrieval.' && (
+          <div className="mb-3 p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 text-[11px] text-slate-300">
+            <span className="text-[10px] font-bold text-cyan-400 block mb-0.5">Proof of Attribution Excerpt:</span>
+            <p className="italic line-clamp-2 text-slate-300">"{bounty.evidence_quote_a}"</p>
+          </div>
+        )}
       </div>
 
       {/* Bottom row: Escrow & Actions */}
@@ -213,13 +231,26 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
                   onClick={() => onAdjudicate(bounty.bounty_id)}
                   disabled={isAdjudicating}
                   className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-md shadow-cyan-500/20 transition disabled:opacity-50"
-                  title="Join as independent DePIN juror to cross-check sources and earn escrow bounty"
+                  title="Join as independent DePIN juror (refundable bond required for skin-in-the-game)"
                 >
                   <Gavel className="h-3.5 w-3.5" />
-                  <span>{isAdjudicating ? 'Jury Adjudicating...' : 'Join & Adjudicate'}</span>
+                  <span>{isAdjudicating ? 'Jury Adjudicating...' : 'Join as Juror'}</span>
                 </button>
               )}
             </>
+          )}
+
+          {/* Dispute & Appeal Button if resolved */}
+          {!isOpen && bounty.status !== 4 && bounty.status !== 5 && onChallenge && (
+            <button
+              onClick={() => onChallenge(bounty.bounty_id)}
+              disabled={isChallenging}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/50 border border-purple-700/50 hover:bg-purple-900/60 text-purple-200 font-bold text-xs transition disabled:opacity-50"
+              title="File a formal appeal to challenge this verdict with an appeal bond"
+            >
+              <Scale className="h-3.5 w-3.5" />
+              <span>{isChallenging ? 'Appealing...' : 'Appeal Court'}</span>
+            </button>
           )}
         </div>
 
