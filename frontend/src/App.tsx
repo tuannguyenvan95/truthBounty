@@ -20,6 +20,21 @@ import { formatEther, parseEther, getAddress } from 'viem';
 import type { Address } from 'viem';
 import { Search, Filter, ShieldCheck, Sparkles, AlertCircle, CheckCircle2, Loader2, Info, Users, Briefcase } from 'lucide-react';
 
+const getCachedBounties = (addr: string): BountyItem[] => {
+  try {
+    const raw = localStorage.getItem(`tb_cache_bounties_${addr.toLowerCase()}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+const setCachedBounties = (addr: string, items: BountyItem[]) => {
+  try {
+    localStorage.setItem(`tb_cache_bounties_${addr.toLowerCase()}`, JSON.stringify(items));
+  } catch {}
+};
+
 export function App() {
   // Wallet State
   const [account, setAccount] = useState<string | null>(null);
@@ -33,7 +48,9 @@ export function App() {
 
   // Data State
   const [stats, setStats] = useState<PlatformStats | null>(null);
-  const [bounties, setBounties] = useState<BountyItem[]>([]);
+  const [bounties, setBounties] = useState<BountyItem[]>(() =>
+    getCachedBounties(getDefaultContractAddress())
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -173,38 +190,43 @@ export function App() {
       const count = Number(countRes.value);
       if (count === 0) {
         setBounties([]);
+        setCachedBounties(contractAddress, []);
         return;
       }
 
-      // 2. Fetch all bounty IDs concurrently
-      const idPromises = Array.from({ length: count }, (_, idx) =>
-        client.readContract({
-          address: contractAddress as Address,
-          functionName: 'get_bounty_id_by_index',
-          args: [idx],
-        })
-      );
-      const idResults = await Promise.allSettled(idPromises);
-      const validIds: string[] = [];
-      for (const res of idResults) {
-        if (res.status === 'fulfilled' && typeof res.value === 'string') {
-          validIds.push(res.value);
-        }
-      }
-
-      // 3. Fetch each bounty details concurrently in parallel
-      const bountyPromises = validIds.map(async (id) => {
+      // 2. Fetch all bounty IDs (with guaranteed fallback to truth-{idx+1} if RPC drops)
+      const idPromises = Array.from({ length: count }, async (_, idx) => {
         try {
-          const raw = await client.readContract({
+          const id = await client.readContract({
             address: contractAddress as Address,
-            functionName: 'get_bounty',
-            args: [id],
+            functionName: 'get_bounty_id_by_index',
+            args: [idx],
           });
-          if (typeof raw === 'string') {
-            return JSON.parse(raw) as BountyItem;
+          if (typeof id === 'string' && id) return id;
+        } catch {}
+        return `truth-${idx + 1}`;
+      });
+      const validIds = await Promise.all(idPromises);
+
+      // 3. Fetch each bounty details with retry for maximum resilience
+      const bountyPromises = validIds.map(async (id) => {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const raw = await client.readContract({
+              address: contractAddress as Address,
+              functionName: 'get_bounty',
+              args: [id],
+            });
+            if (typeof raw === 'string') {
+              return JSON.parse(raw) as BountyItem;
+            }
+          } catch (itemErr) {
+            if (attempt === 0) {
+              await new Promise((r) => setTimeout(r, 200));
+            } else if (!isSilent) {
+              console.warn(`Failed to fetch bounty ${id}:`, itemErr);
+            }
           }
-        } catch (itemErr) {
-          if (!isSilent) console.warn(`Failed to fetch bounty ${id}:`, itemErr);
         }
         return null;
       });
@@ -213,10 +235,24 @@ export function App() {
         (item): item is BountyItem => item !== null
       );
 
-      // Safe update: only update if we retrieved items (never wipe state with empty array on transient RPC drops)
+      // Safe Map-based merge: never drop previously loaded bounties
       if (fetchedBounties.length > 0) {
-        fetchedBounties.reverse();
-        setBounties(fetchedBounties);
+        setBounties((prev) => {
+          const map = new Map<string, BountyItem>();
+          for (const b of prev) {
+            map.set(b.bounty_id, b);
+          }
+          for (const b of fetchedBounties) {
+            map.set(b.bounty_id, b);
+          }
+          const merged = Array.from(map.values()).sort((a, b) => {
+            const numA = parseInt(a.bounty_id.replace(/\D/g, '') || '0', 10);
+            const numB = parseInt(b.bounty_id.replace(/\D/g, '') || '0', 10);
+            return numB - numA;
+          });
+          setCachedBounties(contractAddress, merged);
+          return merged;
+        });
       }
       lastFetchTimeRef.current = Date.now();
     } catch (err: any) {
