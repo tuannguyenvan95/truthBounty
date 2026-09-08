@@ -366,6 +366,15 @@ export function App() {
 
   // Initial load and listeners
   useEffect(() => {
+    // Force active contract to be official contract 0xE8098316a21a3AA74590371ec7dA3f23c77ebAC4
+    try {
+      const saved = localStorage.getItem('truthbounty_contract_address');
+      if (saved !== OFFICIAL_CONTRACT_ADDRESS) {
+        localStorage.setItem('truthbounty_contract_address', OFFICIAL_CONTRACT_ADDRESS);
+        setContractAddress(OFFICIAL_CONTRACT_ADDRESS);
+      }
+    } catch {}
+
     const provider = getEthereumProvider();
     if (provider) {
       provider.request({ method: 'eth_accounts' }).then((accounts: string[]) => {
