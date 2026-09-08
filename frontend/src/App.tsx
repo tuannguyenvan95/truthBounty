@@ -15,7 +15,7 @@ import {
   switchToStudionet,
   getEthereumProvider,
 } from './config/genlayer';
-import { formatEther, parseEther } from 'viem';
+import { formatEther, parseEther, getAddress } from 'viem';
 import type { Address } from 'viem';
 import { Search, Filter, ShieldCheck, Sparkles, AlertCircle, CheckCircle2, Loader2, Info } from 'lucide-react';
 
@@ -259,15 +259,17 @@ export function App() {
       setIsSubmittingClaim(true);
       showToast('info', 'Submitting escrow deposit to GenLayer Studionet...');
 
-      const client = getGenLayerClient(account as Address);
+      const client = getGenLayerClient();
       const valueWei = parseEther(data.amountGen);
+      const userChecksummed = getAddress(account);
+      const contractChecksummed = getAddress(contractAddress);
 
       const txHash = await client.writeContract({
-        address: contractAddress as Address,
+        address: contractChecksummed,
         functionName: 'create_bounty',
         args: [data.claim, data.sourceUrlA, data.sourceUrlB],
         value: valueWei,
-        account: account as any,
+        account: { address: userChecksummed } as any,
       });
 
       showToast('info', `Transaction submitted (${txHash.slice(0, 10)}...). Waiting for finality...`);
@@ -297,14 +299,16 @@ export function App() {
       setActiveAdjudicatingId(bountyId);
       showToast('info', `Triggering multi-source on-chain AI Jury for #${bountyId}...`);
 
-      const client = getGenLayerClient(account as Address);
+      const client = getGenLayerClient();
+      const userChecksummed = getAddress(account);
+      const contractChecksummed = getAddress(contractAddress);
 
       const txHash = await client.writeContract({
-        address: contractAddress as Address,
+        address: contractChecksummed,
         functionName: 'adjudicate',
         args: [bountyId],
         value: 0n,
-        account: account as any,
+        account: { address: userChecksummed } as any,
       });
 
       showToast('info', `Adjudication running (${txHash.slice(0, 10)}...). Scraping sources & reaching consensus...`);
@@ -330,14 +334,16 @@ export function App() {
       setActiveCancellingId(bountyId);
       showToast('info', `Cancelling bounty #${bountyId} and withdrawing escrow...`);
 
-      const client = getGenLayerClient(account as Address);
+      const client = getGenLayerClient();
+      const userChecksummed = getAddress(account);
+      const contractChecksummed = getAddress(contractAddress);
 
       const txHash = await client.writeContract({
-        address: contractAddress as Address,
+        address: contractChecksummed,
         functionName: 'cancel_bounty',
         args: [bountyId],
         value: 0n,
-        account: account as any,
+        account: { address: userChecksummed } as any,
       });
 
       await client.waitForTransactionReceipt({ hash: txHash as any });

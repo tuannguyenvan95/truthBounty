@@ -52,12 +52,11 @@ export const getEthereumProvider = (): any => {
 /**
  * Creates a GenLayer Client connected to Studionet
  */
-export const getGenLayerClient = (accountAddress?: Address) => {
+export const getGenLayerClient = () => {
   const provider = getEthereumProvider();
   return createClient({
     chain: chains.studionet,
     endpoint: STUDIONET_RPC_URL,
-    account: accountAddress,
     provider,
   });
 };

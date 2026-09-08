@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, Settings, Rocket, Check, AlertCircle, Copy, ExternalLink, Loader2 } from 'lucide-react';
 import { STUDIONET_EXPLORER_URL, getGenLayerClient } from '../config/genlayer';
-import type { Address } from 'viem';
+import { getAddress, type Address } from 'viem';
 
 interface ContractSettingsModalProps {
   isOpen: boolean;
@@ -314,12 +314,12 @@ export const ContractSettingsModal: React.FC<ContractSettingsModalProps> = ({
       setError(null);
       setDeployStatus('Broadcasting deploy transaction to GenLayer Studionet...');
 
-      const client = getGenLayerClient(connectedAccount as Address);
+      const client = getGenLayerClient();
       
       const txHash = await client.deployContract({
         code: CONTRACT_SOURCE,
         args: [],
-        account: connectedAccount as any,
+        account: { address: getAddress(connectedAccount) } as any,
       });
 
       setDeployStatus(`Transaction submitted (${txHash.slice(0, 10)}...). Waiting for consensus finalization...`);

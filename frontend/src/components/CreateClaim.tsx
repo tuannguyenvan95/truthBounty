@@ -63,8 +63,9 @@ export const CreateClaim: React.FC<CreateClaimProps> = ({
       return;
     }
 
+    const sanitizedAmount = amountGen.replace(',', '.').trim();
     try {
-      const parsedAmount = parseFloat(amountGen);
+      const parsedAmount = parseFloat(sanitizedAmount);
       if (isNaN(parsedAmount) || parsedAmount <= 0) {
         setError('Bounty escrow must be greater than 0 GEN.');
         return;
@@ -79,7 +80,7 @@ export const CreateClaim: React.FC<CreateClaimProps> = ({
         claim: claim.trim(),
         sourceUrlA: sourceUrlA.trim(),
         sourceUrlB: sourceUrlB.trim(),
-        amountGen: amountGen.trim(),
+        amountGen: sanitizedAmount,
       });
       // Clear form on success
       setClaim('');
