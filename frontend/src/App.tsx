@@ -28,105 +28,26 @@ import { formatEther, parseEther, getAddress } from 'viem';
 import type { Address } from 'viem';
 import { Search, Filter, ShieldCheck, Sparkles, AlertCircle, CheckCircle2, Loader2, Info, Users, Briefcase } from 'lucide-react';
 
-const SEED_BOUNTIES_0XA11E: BountyItem[] = [
-  {
-    bounty_id: 'truth-4',
-    claim: 'DeepSeek open-sources V3 frontier reasoning model with 671B parameters',
-    source_url_a: 'https://techcrunch.com/deepseek-v3-model-weights',
-    source_url_b: 'https://theverge.com/deepseek-ai-reasoning-open-source',
-    bounty_amount: '150000000000000000',
-    creator: '0x8b0bb30f87895066929e71f9cf5c63fc7cba2856',
-    status: 3,
-    verdict: 'UNVERIFIED',
-    reason: 'Both external web sources could not be reached or returned empty diffs.',
-    confidence: 100,
-    evidence_score: 0,
-    evidence_quote_a: 'Source A unreachable or blocked by anti-bot.',
-    evidence_quote_b: 'Source B unreachable or blocked by anti-bot.',
-    created_at_block: 4,
-  },
-  {
-    bounty_id: 'truth-3',
-    claim: 'Major European bank declares emergency insolvency due to digital asset exposure',
-    source_url_a: 'https://bloomberg.com/news/articles/bank-solvency-report',
-    source_url_b: 'https://ft.com/content/european-banking-audit',
-    bounty_amount: '15000000000000000000',
-    creator: '0x8b0bb30f87895066929e71f9cf5c63fc7cba2856',
-    status: 0,
-    verdict: 'PENDING',
-    reason: 'Awaiting independent DePIN juror and multi-source AI consensus.',
-    confidence: 0,
-    evidence_score: 0,
-    evidence_quote_a: 'Pending juror retrieval.',
-    evidence_quote_b: 'Pending juror retrieval.',
-    created_at_block: 3,
-  },
-  {
-    bounty_id: 'truth-2',
-    claim: 'SpaceX successfully launched Starship Flight 5 and caught the booster',
-    source_url_a: 'https://reuters.com/technology/space/spacex-starship-flight-5',
-    source_url_b: 'https://bbc.com/news/articles/spacex-starship-booster-catch',
-    bounty_amount: '10000000000000000000',
-    creator: '0x8b0bb30f87895066929e71f9cf5c63fc7cba2856',
-    status: 3,
-    verdict: 'UNVERIFIED',
-    reason: 'Both external web sources could not be reached or returned empty diffs.',
-    confidence: 100,
-    evidence_score: 0,
-    evidence_quote_a: 'Source A unreachable or blocked by anti-bot.',
-    evidence_quote_b: 'Source B unreachable or blocked by anti-bot.',
-    created_at_block: 2,
-  },
-  {
-    bounty_id: 'truth-1',
-    claim: 'SpaceX successfully launched Starship Flight 5 and caught the booster',
-    source_url_a: 'https://reuters.com/technology/space/spacex-starship-flight-5',
-    source_url_b: 'https://bbc.com/news/articles/spacex-starship-booster-catch',
-    bounty_amount: '10000000000000000000',
-    creator: '0x52c5d806c97f0e00af1a1fc3328fa763a9269723',
-    status: 3,
-    verdict: 'UNVERIFIED',
-    reason: 'Both external web sources could not be reached or returned empty diffs.',
-    confidence: 100,
-    evidence_score: 0,
-    evidence_quote_a: 'Source A unreachable or blocked by anti-bot.',
-    evidence_quote_b: 'Source B unreachable or blocked by anti-bot.',
-    created_at_block: 1,
-  },
-];
-
-const SEED_STATS_0XA11E: PlatformStats = {
-  total_bounties: 4,
-  total_bounty_locked: '15000000000000000000',
-  total_claims_resolved: 3,
-};
-
 const getCachedBounties = (addr: string): BountyItem[] => {
-  const map = new Map<string, BountyItem>();
-  if (addr.toLowerCase() === OFFICIAL_CONTRACT_ADDRESS.toLowerCase()) {
-    for (const b of SEED_BOUNTIES_0XA11E) {
-      map.set(b.bounty_id, b);
-    }
-  }
+  if (!addr || addr === '0x0000000000000000000000000000000000000000') return [];
   try {
     const raw = localStorage.getItem(`tb_cache_bounties_${addr.toLowerCase()}`);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        for (const b of parsed) {
-          map.set(b.bounty_id, b);
-        }
+        return parsed.sort((a, b) => {
+          const numA = parseInt(a.bounty_id.replace(/\D/g, '') || '0', 10);
+          const numB = parseInt(b.bounty_id.replace(/\D/g, '') || '0', 10);
+          return numB - numA;
+        });
       }
     }
   } catch {}
-  return Array.from(map.values()).sort((a, b) => {
-    const numA = parseInt(a.bounty_id.replace(/\D/g, '') || '0', 10);
-    const numB = parseInt(b.bounty_id.replace(/\D/g, '') || '0', 10);
-    return numB - numA;
-  });
+  return [];
 };
 
 const setCachedBounties = (addr: string, items: BountyItem[]) => {
+  if (!addr || addr === '0x0000000000000000000000000000000000000000') return;
   try {
     localStorage.setItem(`tb_cache_bounties_${addr.toLowerCase()}`, JSON.stringify(items));
   } catch {}
@@ -144,12 +65,7 @@ export function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Data State
-  const [stats, setStats] = useState<PlatformStats | null>(() => {
-    if (getDefaultContractAddress().toLowerCase() === OFFICIAL_CONTRACT_ADDRESS.toLowerCase()) {
-      return SEED_STATS_0XA11E;
-    }
-    return null;
-  });
+  const [stats, setStats] = useState<PlatformStats | null>(null);
   const [bounties, setBounties] = useState<BountyItem[]>(() =>
     getCachedBounties(getDefaultContractAddress())
   );
@@ -277,7 +193,7 @@ export function App() {
         }
       } catch {}
 
-      let fetchedBounties: BountyItem[] = [];
+      let fetchedBounties: BountyItem[] | null = null;
 
       // 2. Primary Fast-Sync: Try single-call get_all_bounties (Institutional v0.2.18 Standard)
       try {
@@ -288,7 +204,7 @@ export function App() {
         });
         if (typeof rawAll === 'string') {
           const parsed = JSON.parse(rawAll);
-          if (Array.isArray(parsed) && parsed.length > 0) {
+          if (Array.isArray(parsed)) {
             fetchedBounties = parsed as BountyItem[];
           }
         }
@@ -297,7 +213,7 @@ export function App() {
       }
 
       // 3. Fallback for older contracts without get_all_bounties
-      if (fetchedBounties.length === 0) {
+      if (fetchedBounties === null) {
         try {
           const countRes = await client.readContract({
             address: contractAddress as Address,
@@ -305,7 +221,9 @@ export function App() {
             args: [],
           });
           const count = Number(countRes);
-          if (count > 0) {
+          if (count === 0) {
+            fetchedBounties = [];
+          } else if (count > 0) {
             const idPromises = Array.from({ length: count }, async (_, idx) => {
               try {
                 const id = await client.readContract({
@@ -338,29 +256,15 @@ export function App() {
         } catch {}
       }
 
-      // Safe Map-based merge: never drop previously loaded bounties
-      if (fetchedBounties.length > 0) {
-        setBounties((prev) => {
-          const map = new Map<string, BountyItem>();
-          if (contractAddress.toLowerCase() === OFFICIAL_CONTRACT_ADDRESS.toLowerCase()) {
-            for (const b of SEED_BOUNTIES_0XA11E) {
-              map.set(b.bounty_id, b);
-            }
-          }
-          for (const b of prev) {
-            map.set(b.bounty_id, b);
-          }
-          for (const b of fetchedBounties) {
-            map.set(b.bounty_id, b);
-          }
-          const merged = Array.from(map.values()).sort((a, b) => {
-            const numA = parseInt(a.bounty_id.replace(/\D/g, '') || '0', 10);
-            const numB = parseInt(b.bounty_id.replace(/\D/g, '') || '0', 10);
-            return numB - numA;
-          });
-          setCachedBounties(contractAddress, merged);
-          return merged;
+      // Live contract synchronization: update with exact on-chain bounties
+      if (fetchedBounties !== null) {
+        const sorted = [...fetchedBounties].sort((a, b) => {
+          const numA = parseInt(a.bounty_id.replace(/\D/g, '') || '0', 10);
+          const numB = parseInt(b.bounty_id.replace(/\D/g, '') || '0', 10);
+          return numB - numA;
         });
+        setBounties(sorted);
+        setCachedBounties(contractAddress, sorted);
       }
       lastFetchTimeRef.current = Date.now();
     } catch (err: any) {
@@ -374,15 +278,6 @@ export function App() {
 
   // Initial load and listeners
   useEffect(() => {
-    // Force active contract to be official contract 0xE8098316a21a3AA74590371ec7dA3f23c77ebAC4
-    try {
-      const saved = localStorage.getItem('truthbounty_contract_address');
-      if (saved !== OFFICIAL_CONTRACT_ADDRESS) {
-        localStorage.setItem('truthbounty_contract_address', OFFICIAL_CONTRACT_ADDRESS);
-        setContractAddress(OFFICIAL_CONTRACT_ADDRESS);
-      }
-    } catch {}
-
     const provider = getEthereumProvider();
     if (provider) {
       provider.request({ method: 'eth_accounts' }).then((accounts: string[]) => {
@@ -1074,6 +969,8 @@ export function App() {
         onSaveAddress={(newAddr) => {
           setSavedContractAddress(newAddr);
           setContractAddress(newAddr);
+          setBounties(getCachedBounties(newAddr));
+          setStats(null);
           showToast('success', `Active contract updated to ${newAddr.slice(0, 8)}...`);
         }}
         connectedAccount={account}

@@ -17,8 +17,8 @@ export const STORAGE_KEY_CONTRACT_ADDRESS = 'truthbounty_contract_address';
 export const getDefaultContractAddress = (): `0x${string}` => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY_CONTRACT_ADDRESS);
-    if (saved !== OFFICIAL_CONTRACT_ADDRESS) {
-      localStorage.setItem(STORAGE_KEY_CONTRACT_ADDRESS, OFFICIAL_CONTRACT_ADDRESS);
+    if (saved && saved.startsWith('0x') && saved.length === 42) {
+      return saved as `0x${string}`;
     }
   } catch {}
   return OFFICIAL_CONTRACT_ADDRESS;
