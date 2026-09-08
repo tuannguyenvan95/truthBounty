@@ -358,7 +358,7 @@ Respond ONLY with valid JSON:
 
         self.bounties[bounty_id] = bounty
 
-    @gl.public.write
+    @gl.public.write.payable
     def adjudicate(self, bounty_id: str) -> None:
         """Alias for join_and_adjudicate."""
         self.join_and_adjudicate(bounty_id)

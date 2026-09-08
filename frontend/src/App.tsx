@@ -435,41 +435,39 @@ export function App() {
       const userChecksummed = getAddress(account);
       const contractChecksummed = getAddress(contractAddress);
 
-      // Check contract capability: does this deployed contract support join_and_adjudicate or legacy adjudicate?
-      let targetFunction = 'adjudicate';
-      let txValue = 0n;
-
-      try {
-        const schema = await client.getContractSchema(contractChecksummed);
-        if (schema?.methods?.join_and_adjudicate) {
-          targetFunction = 'join_and_adjudicate';
-          let jurorBondWei = 5000000000000000n; // 0.005 GEN default
-          if (targetBounty) {
-            try {
-              const rawBountyVal = BigInt(targetBounty.bounty_amount);
-              const computed5Percent = rawBountyVal / 20n;
-              if (computed5Percent > jurorBondWei) jurorBondWei = computed5Percent;
-            } catch {}
+      // Calculate 5% minimum skin-in-the-game bond (Institutional Standard)
+      let jurorBondWei = 5000000000000000n; // 0.005 GEN default
+      if (targetBounty) {
+        try {
+          const rawBountyVal = BigInt(targetBounty.bounty_amount);
+          const computed5Percent = (rawBountyVal * 5n) / 100n;
+          if (computed5Percent > jurorBondWei) {
+            jurorBondWei = computed5Percent;
           }
-          txValue = jurorBondWei;
-        }
-      } catch (schemaErr) {
-        console.warn('Schema check fallback:', schemaErr);
+        } catch {}
       }
 
-      if (txValue > 0n) {
-        showToast('info', `Staking ${formatGenAmount(txValue)} GEN refundable bond & activating GenLayer AI Jury...`);
-      } else {
-        showToast('info', `Activating GenLayer on-chain AI Jury for #${bountyId}...`);
-      }
+      showToast('info', `Staking ${formatGenAmount(jurorBondWei)} GEN refundable bond & activating GenLayer AI Jury...`);
 
-      const txHash = await client.writeContract({
-        address: contractChecksummed,
-        functionName: targetFunction,
-        args: [bountyId],
-        value: txValue,
-        account: { address: userChecksummed } as any,
-      });
+      let txHash: any;
+      try {
+        txHash = await client.writeContract({
+          address: contractChecksummed,
+          functionName: 'join_and_adjudicate',
+          args: [bountyId],
+          value: jurorBondWei,
+          account: { address: userChecksummed } as any,
+        });
+      } catch (callErr) {
+        // Fallback for contracts with adjudicate entry point
+        txHash = await client.writeContract({
+          address: contractChecksummed,
+          functionName: 'adjudicate',
+          args: [bountyId],
+          value: jurorBondWei,
+          account: { address: userChecksummed } as any,
+        });
+      }
 
       // Immediately broadcast lock across tabs so creator cannot cancel
       const lockData = { juror: userChecksummed, time: Date.now() };
@@ -483,7 +481,7 @@ export function App() {
       setBounties((prev) =>
         prev.map((b) =>
           b.bounty_id === bountyId
-            ? { ...b, juror: userChecksummed, juror_bond: txValue.toString() }
+            ? { ...b, juror: userChecksummed, juror_bond: jurorBondWei.toString() }
             : b
         )
       );

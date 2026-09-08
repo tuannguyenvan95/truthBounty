@@ -7,17 +7,27 @@ export const STUDIONET_RPC_URL = 'https://studio.genlayer.com/api';
 export const STUDIONET_EXPLORER_URL = 'https://studio.genlayer.com';
 
 // Official deployed TruthBounty contract on GenLayer Studionet
-export const OFFICIAL_CONTRACT_ADDRESS: `0x${string}` = '0xE8098316a21a3AA74590371ec7dA3f23c77ebAC4';
+export const OFFICIAL_CONTRACT_ADDRESS: `0x${string}` = '0x874fF0f175CBa6A6040dD97A174f1968e378988f';
 
 export const STORAGE_KEY_CONTRACT_ADDRESS = 'truthbounty_contract_address';
 
+const LEGACY_CONTRACT_ADDRESSES = [
+  '0xe8098316a21a3aa74590371ec7da3f23c77ebac4',
+  '0xa11e74f1311029c9ccbb715ff2f4955b5501fa04',
+  '0xa11e000000000000000000000000000000000000',
+];
+
 /**
- * Get active contract address - strictly locked to official contract 0xE8098316a21a3AA74590371ec7dA3f23c77ebAC4
+ * Get active contract address with auto-migration from deprecated contract instances
  */
 export const getDefaultContractAddress = (): `0x${string}` => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY_CONTRACT_ADDRESS);
     if (saved && saved.startsWith('0x') && saved.length === 42) {
+      if (LEGACY_CONTRACT_ADDRESSES.includes(saved.toLowerCase())) {
+        localStorage.setItem(STORAGE_KEY_CONTRACT_ADDRESS, OFFICIAL_CONTRACT_ADDRESS);
+        return OFFICIAL_CONTRACT_ADDRESS;
+      }
       return saved as `0x${string}`;
     }
   } catch {}
