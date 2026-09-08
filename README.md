@@ -36,7 +36,7 @@ TruthBounty is a decentralized, on-chain fact-checking and news attribution cour
 | **Chain ID** | `61999` (`0xF22F`) |
 | **RPC Endpoint** | `https://studio.genlayer.com/api` |
 | **Currency Symbol** | `GEN` (18 Decimals) |
-| **Official Contract** | `0x141CEa8359D5A74730ED930b727455564FbE63ab` |
+| **Official Contract** | `0xA11e61cc9Ee7EDB222Af3A3B6528dfAFc93bb832` |
 | **Explorer** | [https://studio.genlayer.com](https://studio.genlayer.com) |
 
 ---

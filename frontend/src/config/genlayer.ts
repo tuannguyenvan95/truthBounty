@@ -7,7 +7,7 @@ export const STUDIONET_RPC_URL = 'https://studio.genlayer.com/api';
 export const STUDIONET_EXPLORER_URL = 'https://studio.genlayer.com';
 
 // Official deployed TruthBounty contract on GenLayer Studionet
-export const OFFICIAL_CONTRACT_ADDRESS: `0x${string}` = '0x141CEa8359D5A74730ED930b727455564FbE63ab';
+export const OFFICIAL_CONTRACT_ADDRESS: `0x${string}` = '0xA11e61cc9Ee7EDB222Af3A3B6528dfAFc93bb832';
 
 export const STORAGE_KEY_CONTRACT_ADDRESS = 'truthbounty_contract_address';
 
