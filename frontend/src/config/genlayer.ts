@@ -6,12 +6,13 @@ export const STUDIONET_CHAIN_ID_HEX = '0xf22f'; // 61999 in hex (0xf22f)
 export const STUDIONET_RPC_URL = 'https://studio.genlayer.com/api';
 export const STUDIONET_EXPLORER_URL = 'https://studio.genlayer.com';
 
-// Official deployed TruthBounty contract on GenLayer Studionet
-export const OFFICIAL_CONTRACT_ADDRESS: `0x${string}` = '0x874fF0f175CBa6A6040dD97A174f1968e378988f';
+// Official deployed TruthBounty contract on GenLayer Studionet (v0.2.19 - Dual-Sided Protection with Preserved Prior Bonds & Terminating Appeal)
+export const OFFICIAL_CONTRACT_ADDRESS: `0x${string}` = '0xB04Ac41959183c59342e2dA0E02f4a7aD51Ca18b';
 
 export const STORAGE_KEY_CONTRACT_ADDRESS = 'truthbounty_contract_address';
 
 const LEGACY_CONTRACT_ADDRESSES = [
+  '0x874ff0f175cba6a6040dd97a174f1968e378988f',
   '0xe8098316a21a3aa74590371ec7da3f23c77ebac4',
   '0xa11e74f1311029c9ccbb715ff2f4955b5501fa04',
   '0xa11e000000000000000000000000000000000000',
@@ -133,6 +134,10 @@ export interface BountyItem {
   disputed_at?: number | string;
   dispute_reason?: string;
   appeal_count?: number;
+  prior_jurors?: string[];
+  prior_bonds?: string[];
+  appeal_round?: number;
+  max_appeal_rounds?: number;
   created_at_block?: string | number;
 }
 

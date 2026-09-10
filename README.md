@@ -36,7 +36,7 @@ TruthBounty is a decentralized, on-chain fact-checking and news attribution cour
 | **Chain ID** | `61999` (`0xF22F`) |
 | **RPC Endpoint** | `https://studio.genlayer.com/api` |
 | **Currency Symbol** | `GEN` (18 Decimals) |
-| **Official Contract** | `0x874fF0f175CBa6A6040dD97A174f1968e378988f` |
+| **Official Contract** | `0xB04Ac41959183c59342e2dA0E02f4a7aD51Ca18b` |
 | **Explorer** | [https://studio.genlayer.com](https://studio.genlayer.com) |
 
 ---
@@ -46,10 +46,10 @@ TruthBounty is a decentralized, on-chain fact-checking and news attribution cour
 ```
 truthBounty/
 ├── contracts/
-│   └── contract.py               # Production TruthBounty contract (GenVM Python)
+│   └── contract.py               # Production TruthBounty contract v0.2.19 (GenVM Python)
 ├── tests/
-│   ├── conftest.py               # gltest fixtures with bare-dict sim_installMocks
-│   └── test_truthbounty.py       # Automated tests (TRUE, FALSE, UNVERIFIED, CANCELLED)
+│   ├── conftest.py               # gltest fixtures with direct_vm & sim_installMocks
+│   └── test_truthbounty.py       # 14 Comprehensive automated tests covering all flows
 ├── frontend/
 │   ├── index.html                # HTML entry point with cyber aesthetic
 │   ├── package.json              # Vite + React 18 + TS + TailwindCSS + genlayer-js
@@ -62,7 +62,7 @@ truthBounty/
 │       │   ├── Navbar.tsx        # Wallet connection, Studionet status, balance
 │       │   ├── StatsBar.tsx      # Aggregate on-chain metrics
 │       │   ├── CreateClaim.tsx   # Multi-source escrow deposit form & presets
-│       │   ├── ClaimCard.tsx     # Bounty card with status badges & jury actions
+│       │   ├── ClaimCard.tsx     # Bounty card with status badges, appeals & jury actions
 │       │   ├── JuryAudit.tsx     # Transparent on-chain AI deliberation modal
 │       │   └── ContractSettingsModal.tsx # In-browser deployment & address switch
 │       ├── App.tsx               # Main application controller
@@ -74,7 +74,7 @@ truthBounty/
 
 ---
 
-## ⚙️ Smart Contract Architecture (`contracts/contract.py`)
+## ⚙️ Smart Contract Architecture (`contracts/contract.py` v0.2.19)
 
 - **GenVM Header**:
   ```python
@@ -85,13 +85,14 @@ truthBounty/
   - `bounties: TreeMap[str, Bounty]`
   - `bounty_ids: DynArray[str]`
   - `total_bounty_locked: bigint`
-  - `total_claims_resolved: u32`
+  - `total_claims_resolved: bigint`
   - `bounty_counter: u64`
-- **Core Functions**:
-  - `create_bounty(claim, source_url_a, source_url_b)` (`payable`): Locks native `GEN` in escrow.
-  - `adjudicate(bounty_id)`: Fetches both web sources live via `gl.nondet.web.render`, executes LLM juror prompt, verifies consensus via `gl.vm.run_nondet`, updates state, and transfers reward via `gl.get_contract_at(...).emit_transfer(...)`.
-  - `cancel_bounty(bounty_id)`: Creator can cancel OPEN bounty and reclaim escrow.
-  - Views: `get_bounty(bounty_id)`, `get_bounty_count()`, `get_bounty_id_by_index(idx)`, `get_stats()`.
+- **Core Security & Protocol Safeguards**:
+  - **Prior Juror Bond Preservation**: When a dispute is re-adjudicated across appeal rounds, every previous juror and bond is tracked (`prior_jurors`, `prior_bonds`). In final settlement or timeout, 100% of all prior juror bonds are refunded.
+  - **Terminating Appeal & Settlement Path**: Bounded appeals (`max_appeal_rounds = 2`). Abandoned disputes can be settled after 7 days (`settle_dispute_timeout`), guaranteeing no funds remain permanently locked.
+  - **Deterministic Timestamps**: Operates on GenVM WASI deterministic clock and consensus timestamps, removing non-deterministic `time.time()`.
+  - **Strong Source-Independence**: Enforces distinct publisher domains (`_extract_domain`), rejecting identical URLs and single-domain collusions.
+  - **Validator Rigor**: Consensus validators strictly verify leader reasoning length (>= 10 chars), score bounds [0, 100], and verbatim evidence quotes.
 
 ---
 
@@ -100,16 +101,25 @@ truthBounty/
 The project uses the official GenLayer test framework (`gltest`) and `pytest`.
 
 ```bash
-# Run all tests
+# Run all 14 unit tests
 pytest tests/test_truthbounty.py -v
 ```
 
-### Verified Test Cases
+### Verified Test Cases (14/14 Passing)
 1. `test_create_bounty`: Escrow lock and state initialization.
 2. `test_adjudicate_true`: Multi-source corroboration resulting in `RESOLVED_TRUE` and reward emission.
 3. `test_adjudicate_false`: Debunking evidence resulting in `RESOLVED_FALSE` and bounty emission.
 4. `test_adjudicate_unverified_fallback`: Defensive handling when sources fail or conflict (`UNVERIFIED` + refund).
 5. `test_cancel_bounty`: Creator escrow withdrawal and cancellation rejection for non-creators.
+6. `test_creator_cannot_adjudicate_own_bounty`: Enforces strict conflict-of-interest prevention.
+7. `test_juror_bond_and_evidence_quotes`: Juror skin-in-the-game bond and verbatim evidence quote storage.
+8. `test_challenge_appeal_flow`: Escrow freezing during the 24h cooling-off window.
+9. `test_settlement_cooling_off_protection`: Settlement blocked before 24h cooling-off elapses.
+10. `test_source_independence_rejection`: Rejection of identical URLs and matching domain publishers.
+11. `test_validator_checks_reasoning_and_quotes`: Validator rejection of empty quotes, short reasoning, or invalid scores.
+12. `test_repeated_adjudication_and_prior_bonds_preserved`: Disputed re-adjudication preserves and refunds 100% of all prior juror bonds.
+13. `test_terminating_appeal_path`: Terminal dispute boundary reached after max appeal rounds.
+14. `test_dispute_timeout_settlement`: Settle abandoned disputes after 7 days with complete refund.
 
 ---
 

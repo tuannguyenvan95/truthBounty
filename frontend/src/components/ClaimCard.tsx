@@ -180,6 +180,11 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
             <span className="text-xs font-mono font-bold text-cyan-400 bg-cyan-950/60 px-2.5 py-0.5 rounded-lg border border-cyan-800/40">
               #{bounty.bounty_id}
             </span>
+            {Boolean(bounty.appeal_round && Number(bounty.appeal_round) > 0) && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-500/25 text-purple-300 border border-purple-500/40">
+                Appeal R{Number(bounty.appeal_round)}/{Number(bounty.max_appeal_rounds || 2)}
+              </span>
+            )}
             <span className="text-xs text-slate-400 font-mono">
               by {bounty.creator.slice(0, 6)}...{bounty.creator.slice(-4)}
             </span>
@@ -307,6 +312,19 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({
           <div className="mb-3 p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 text-[11px] text-slate-300">
             <span className="text-[10px] font-bold text-cyan-400 block mb-0.5">Proof of Attribution Excerpt:</span>
             <p className="italic line-clamp-2 text-slate-300">"{bounty.evidence_quote_a}"</p>
+          </div>
+        )}
+
+        {/* Prior Juror Bonds Protected */}
+        {bounty.prior_jurors && bounty.prior_jurors.length > 0 && (
+          <div className="mb-3 px-3 py-2 rounded-xl bg-purple-950/40 border border-purple-800/40 text-[11px] text-purple-200 flex items-center justify-between">
+            <span className="font-semibold flex items-center gap-1.5">
+              <Shield className="h-3.5 w-3.5 text-purple-400" />
+              Prior Juror Bonds Protected:
+            </span>
+            <span className="font-mono font-bold text-purple-300">
+              {bounty.prior_jurors.length} Prior Juror(s)
+            </span>
           </div>
         )}
       </div>

@@ -206,7 +206,7 @@ def test_creator_cannot_adjudicate_own_bounty(direct_vm, direct_deploy, direct_a
     bounty_id = contract.create_bounty(
         claim="Breaking news to self-verify",
         source_url_a="https://news.example/1",
-        source_url_b="https://news.example/2",
+        source_url_b="https://press.example/2",
     )
 
     # Alice (creator) tries to adjudicate her own bounty -> must be rejected
@@ -352,3 +352,309 @@ def test_settlement_cooling_off_protection(direct_vm, direct_deploy, direct_alic
         contract.finalize_settlement(bounty_id)
 
 
+def test_source_independence_rejection(direct_vm, direct_deploy, direct_alice):
+    """Test strict source-independence enforcement: rejecting duplicate URLs and matching publisher domains."""
+    contract = direct_deploy(str(CONTRACT_PATH))
+    direct_vm.sender = direct_alice
+    direct_vm.value = 1000000000000000000
+
+    # 1. Identical URLs must be rejected
+    with pytest.raises(Exception, match="cannot be identical"):
+        contract.create_bounty(
+            claim="Identical source test",
+            source_url_a="https://reuters.example/news/123",
+            source_url_b="https://reuters.example/news/123",
+        )
+
+    # 2. Same base domain/publisher must be rejected
+    with pytest.raises(Exception, match="Source independence violation: both sources resolve to the same domain"):
+        contract.create_bounty(
+            claim="Same domain test",
+            source_url_a="https://www.reuters.example/world/article-1",
+            source_url_b="https://reuters.example/finance/article-2",
+        )
+
+    # 3. Independent domains succeed
+    bounty_id = contract.create_bounty(
+        claim="Independent domains succeed",
+        source_url_a="https://reuters.example/world/article-1",
+        source_url_b="https://apnews.example/world/article-2",
+    )
+    assert bounty_id == "truth-1"
+
+
+def test_validator_checks_reasoning_and_quotes(direct_vm, direct_deploy, direct_alice, direct_bob, sim_install_mocks):
+    """Test that validators reject leader proposals with empty quotes or short/missing reasoning."""
+    contract = direct_deploy(str(CONTRACT_PATH))
+    direct_vm.sender = direct_alice
+    direct_vm.value = 1000000000000000000
+
+    bounty_id = contract.create_bounty(
+        claim="Validator test for reasoning and evidence quotes",
+        source_url_a="https://news-a.example/test",
+        source_url_b="https://news-b.example/test",
+    )
+
+    mock_web = {
+        "https://news-a.example/test": {"method": "GET", "status": 200, "body": "Fact statement from source A."},
+        "https://news-b.example/test": {"method": "GET", "status": 200, "body": "Fact statement from source B."},
+    }
+
+    # Initial valid adjudication captures the validator function
+    sim_install_mocks(
+        direct_vm,
+        mock_web=mock_web,
+        mock_llm={
+            r".*Validator test.*": json.dumps({
+                "verdict": "TRUE",
+                "confidence": 95,
+                "evidence_score": 90,
+                "evidence_quote_a": "Fact statement from source A.",
+                "evidence_quote_b": "Fact statement from source B.",
+                "reason": "Both independent sources verify the factual claim accurately.",
+            })
+        }
+    )
+    direct_vm.sender = direct_bob
+    direct_vm.value = 100000000000000000
+    contract.join_and_adjudicate(bounty_id)
+
+    # 1. Proposal with empty evidence_quote_a on TRUE verdict -> validator must reject
+    assert not direct_vm.run_validator(leader_result={
+        "verdict": "TRUE",
+        "confidence": 95,
+        "evidence_score": 90,
+        "evidence_quote_a": "",
+        "evidence_quote_b": "Valid quote B",
+        "reason": "This is a sufficiently long explanation for the verdict.",
+    })
+
+    # 2. Proposal with reasoning under 10 chars -> validator must reject
+    assert not direct_vm.run_validator(leader_result={
+        "verdict": "TRUE",
+        "confidence": 95,
+        "evidence_score": 90,
+        "evidence_quote_a": "Quote A",
+        "evidence_quote_b": "Quote B",
+        "reason": "Short",
+    })
+
+    # 3. Proposal with out-of-range confidence (>100) -> validator must reject
+    assert not direct_vm.run_validator(leader_result={
+        "verdict": "TRUE",
+        "confidence": 150,
+        "evidence_score": 90,
+        "evidence_quote_a": "Quote A",
+        "evidence_quote_b": "Quote B",
+        "reason": "This is a sufficiently long explanation for the verdict.",
+    })
+
+    # 4. Valid proposal meeting all criteria -> validator accepts
+    assert direct_vm.run_validator(leader_result={
+        "verdict": "TRUE",
+        "confidence": 95,
+        "evidence_score": 90,
+        "evidence_quote_a": "Fact statement from source A.",
+        "evidence_quote_b": "Fact statement from source B.",
+        "reason": "Both independent sources verify the factual claim accurately.",
+    })
+
+
+def test_repeated_adjudication_and_prior_bonds_preserved(
+    direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie, sim_install_mocks
+):
+    """
+    Test disputed re-adjudication ensuring:
+    1. Re-adjudication records prior juror and their bond.
+    2. Final settlement refunds 100% of all prior juror bonds across appeal rounds.
+    """
+    contract = direct_deploy(str(CONTRACT_PATH))
+
+    direct_vm.sender = direct_alice
+    direct_vm.value = 1000000000000000000  # 1 GEN
+    bounty_id = contract.create_bounty(
+        claim="Mars rover confirms ancient subterranean lake",
+        source_url_a="https://nasa.example/mars-lake",
+        source_url_b="https://esa.example/radar-discovery",
+    )
+
+    mock_web = {
+        "https://nasa.example/mars-lake": {"method": "GET", "status": 200, "body": "Perseverance radar confirms subterranean lake."},
+        "https://esa.example/radar-discovery": {"method": "GET", "status": 200, "body": "MARSIS radar echoes independently verify liquid deposit."},
+    }
+
+    mock_llm = {
+        r".*Mars rover.*": json.dumps({
+            "verdict": "TRUE",
+            "confidence": 96,
+            "evidence_score": 92,
+            "evidence_quote_a": "Perseverance radar confirms subterranean lake.",
+            "evidence_quote_b": "MARSIS radar echoes independently verify liquid deposit.",
+            "reason": "Both NASA and ESA confirmed subterranean liquid lake on Mars.",
+        })
+    }
+
+    sim_install_mocks(direct_vm, mock_web=mock_web, mock_llm=mock_llm)
+
+    # Round 0: Bob adjudicates with 0.1 GEN bond
+    direct_vm.sender = direct_bob
+    direct_vm.value = 100000000000000000  # 0.1 GEN
+    contract.join_and_adjudicate(bounty_id)
+
+    bounty = json.loads(contract.get_bounty(bounty_id))
+    assert bounty["status"] == "AWAITING_PAYOUT"
+    assert bounty["appeal_round"] == 0
+    assert len(bounty["prior_jurors"]) == 0
+
+    # Alice disputes the verdict during cooling-off window
+    direct_vm.sender = direct_alice
+    contract.raise_dispute(bounty_id, "Awaiting supplementary peer-reviewed spectroscopic confirmation.")
+
+    bounty = json.loads(contract.get_bounty(bounty_id))
+    assert bounty["status"] == "DISPUTED"
+
+    # Round 1: Charlie re-adjudicates with 0.1 GEN bond
+    direct_vm.sender = direct_charlie
+    direct_vm.value = 100000000000000000
+    contract.join_and_adjudicate(bounty_id)
+
+    bounty = json.loads(contract.get_bounty(bounty_id))
+    assert bounty["status"] == "AWAITING_PAYOUT"
+    assert bounty["appeal_round"] == 1
+    # Verify prior juror (Bob) and his bond were preserved in storage
+    assert len(bounty["prior_jurors"]) == 1
+    assert bounty["prior_bonds"][0] == "100000000000000000"
+
+    # Warp past the 24-hour cooling-off window
+    direct_vm.warp("2026-09-12T15:00:00Z")
+
+    # Finalize settlement: Current juror (Charlie) gets bounty + bond, prior juror (Bob) refunded bond
+    direct_vm.sender = direct_alice
+    contract.finalize_settlement(bounty_id)
+
+    bounty = json.loads(contract.get_bounty(bounty_id))
+    assert bounty["status"] == "RESOLVED_TRUE"
+    assert bounty["bounty_amount"] == "0"
+    assert bounty["juror_bond"] == "0"
+    assert bounty["prior_bonds"][0] == "0"  # Cleared after refund
+
+
+def test_terminating_appeal_path(
+    direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie, sim_install_mocks
+):
+    """Test that disputes terminate when max_appeal_rounds is reached, preventing infinite dispute loops."""
+    contract = direct_deploy(str(CONTRACT_PATH))
+
+    direct_vm.sender = direct_alice
+    direct_vm.value = 1000000000000000000  # 1 GEN
+    # Create bounty with max_appeal_rounds = 2
+    bounty_id = contract.create_bounty(
+        claim="Global fusion experiment achieves sustained net energy gain",
+        source_url_a="https://iter.example/net-energy",
+        source_url_b="https://nature-fusion.example/q-factor",
+        max_appeal_rounds=2
+    )
+
+    mock_web = {
+        "https://iter.example/net-energy": {"method": "GET", "status": 200, "body": "Tokamak achieves Q > 1.2 sustained for 10 minutes."},
+        "https://nature-fusion.example/q-factor": {"method": "GET", "status": 200, "body": "Independent diagnostics verify net energy output."},
+    }
+    mock_llm = {
+        r".*fusion.*": json.dumps({
+            "verdict": "TRUE",
+            "confidence": 98,
+            "evidence_score": 95,
+            "evidence_quote_a": "Tokamak achieves Q > 1.2 sustained for 10 minutes.",
+            "evidence_quote_b": "Independent diagnostics verify net energy output.",
+            "reason": "Both sources confirm net positive fusion energy achieved.",
+        })
+    }
+    sim_install_mocks(direct_vm, mock_web=mock_web, mock_llm=mock_llm)
+
+    # Initial adjudication (appeal_round = 0)
+    direct_vm.sender = direct_bob
+    direct_vm.value = 100000000000000000
+    contract.join_and_adjudicate(bounty_id)
+
+    # Appeal 1
+    direct_vm.sender = direct_alice
+    contract.raise_dispute(bounty_id, "Dispute 1: Need calometric audit.")
+    direct_vm.sender = direct_charlie
+    direct_vm.value = 100000000000000000
+    contract.join_and_adjudicate(bounty_id)  # appeal_round -> 1
+
+    # Appeal 2 (reaches max_appeal_rounds = 2)
+    direct_vm.sender = direct_alice
+    contract.raise_dispute(bounty_id, "Dispute 2: Questioning secondary sensor calibration.")
+    direct_vm.sender = direct_bob
+    direct_vm.value = 100000000000000000
+    contract.join_and_adjudicate(bounty_id)  # appeal_round -> 2
+
+    # Attempt Appeal 3 (exceeds max_appeal_rounds) -> MUST be rejected by terminating appeal path
+    direct_vm.sender = direct_alice
+    with pytest.raises(Exception, match="Terminating appeal path reached"):
+        contract.raise_dispute(bounty_id, "Dispute 3: Attempting third dispute.")
+
+    # Settle after cooling-off
+    direct_vm.warp("2026-09-15T15:00:00Z")
+    contract.finalize_settlement(bounty_id)
+    bounty = json.loads(contract.get_bounty(bounty_id))
+    assert bounty["status"] == "RESOLVED_TRUE"
+
+
+def test_dispute_timeout_settlement(direct_vm, direct_deploy, direct_alice, direct_bob, sim_install_mocks):
+    """Test terminating settlement path when a dispute is abandoned for > 7 days."""
+    contract = direct_deploy(str(CONTRACT_PATH))
+
+    direct_vm.sender = direct_alice
+    direct_vm.value = 1000000000000000000
+    bounty_id = contract.create_bounty(
+        claim="Archaeologists uncover lost desert metropolis",
+        source_url_a="https://archaeology.example/site",
+        source_url_b="https://geo.example/lidar",
+    )
+
+    mock_web = {
+        "https://archaeology.example/site": {"method": "GET", "status": 200, "body": "Excavation uncovers walls."},
+        "https://geo.example/lidar": {"method": "GET", "status": 200, "body": "LiDAR maps urban settlement."},
+    }
+    mock_llm = {
+        r".*metropolis.*": json.dumps({
+            "verdict": "TRUE",
+            "confidence": 90,
+            "evidence_score": 85,
+            "evidence_quote_a": "Excavation uncovers walls.",
+            "evidence_quote_b": "LiDAR maps urban settlement.",
+            "reason": "Excavation and LiDAR data match.",
+        })
+    }
+    sim_install_mocks(direct_vm, mock_web=mock_web, mock_llm=mock_llm)
+
+    direct_vm.sender = direct_bob
+    direct_vm.value = 50000000000000000
+    contract.join_and_adjudicate(bounty_id)
+
+    # Alice disputes
+    direct_vm.sender = direct_alice
+    contract.raise_dispute(bounty_id, "Dating is disputed by regional survey.")
+
+    # Attempt premature timeout settlement (< 7 days) -> fails
+    with pytest.raises(Exception, match="still active"):
+        contract.settle_dispute_timeout(bounty_id)
+
+    # Unauthorized caller -> fails
+    direct_vm.sender = direct_bob
+    with pytest.raises(Exception, match="Unauthorized"):
+        contract.settle_dispute_timeout(bounty_id)
+
+    # Warp 8 days into the future (> 7 days dispute timeout)
+    direct_vm.warp("2026-09-25T12:00:00Z")
+
+    # Creator triggers timeout settlement
+    direct_vm.sender = direct_alice
+    contract.settle_dispute_timeout(bounty_id)
+
+    bounty = json.loads(contract.get_bounty(bounty_id))
+    assert bounty["status"] == "UNVERIFIED"
+    assert bounty["bounty_amount"] == "0"
+    assert bounty["juror_bond"] == "0"

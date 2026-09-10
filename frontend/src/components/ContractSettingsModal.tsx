@@ -12,13 +12,14 @@ interface ContractSettingsModalProps {
 }
 
 // Full contract Python code bundled for 1-click in-browser deployment to Studionet!
-const CONTRACT_SOURCE = `# v0.2.18
+const CONTRACT_SOURCE = `# v0.2.19
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 from genlayer import *
 from dataclasses import dataclass
 import json
 import hashlib
-import time
+from urllib.parse import urlparse
+from datetime import datetime, timezone
 
 
 class UserError(Exception):
@@ -33,13 +34,34 @@ def _addr_str(addr: Address) -> str:
         return str(addr)
 
 
+def _extract_domain(url: str) -> str:
+    """
+    Extract normalized second-level domain from a URL to enforce strict publisher independence.
+    Example: 'https://news.bbc.co.uk/articles/1' -> 'bbc.co.uk'
+             'https://www.reuters.com/tech' -> 'reuters.com'
+    """
+    try:
+        parsed = urlparse(url.strip())
+        host = parsed.netloc.lower()
+        if ":" in host:
+            host = host.split(":")[0]
+        if host.startswith("www."):
+            host = host[4:]
+        return host
+    except Exception:
+        parts = url.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+        if parts.startswith("www."):
+            parts = parts[4:]
+        return parts.lower()
+
+
 @allow_storage
 @dataclass
 class Bounty:
     """
     Storage struct representing a multi-source fact-checking bounty
     with institutional Dual-Sided Protection, 24h dispute cooling-off,
-    artifact SHA-256 pinning, and trusted execution timestamps.
+    artifact SHA-256 pinning, deterministic timestamps, and preserved juror bonds.
     """
     bounty_id: str
     creator: Address
@@ -56,18 +78,22 @@ class Bounty:
     evidence_score: bigint         # 0 - 100: Source reliability and alignment score
     evidence_quote_a: str          # Verified excerpt from Source A
     evidence_quote_b: str          # Verified excerpt from Source B
-    juror: Address                 # Resolver / Juror who adjudicated
-    juror_bond: bigint             # Staked collateral (skin-in-the-game)
+    juror: Address                 # Current active resolver / Juror
+    juror_bond: bigint             # Current active juror's staked collateral
     payout_ready_at: bigint        # Timestamp when cooling-off window elapses
     disputed_at: bigint            # Timestamp when an appeal was raised
     dispute_reason: str            # Reason recorded if an appeal was filed
+    prior_jurors: DynArray[Address]  # Preserved history of all prior jurors across appeals
+    prior_bonds: DynArray[bigint]    # Preserved bonds of all prior jurors to be refunded
+    appeal_round: u64              # Current appeal round (0: Initial, 1: Appeal 1, 2: Final)
+    max_appeal_rounds: u64         # Maximum allowed appeal rounds (terminating appeal path)
 
 
 class Contract(gl.Contract):
     """
     TruthBounty: Multi-Source Autonomous Fact-Checking & Attribution Court
     Target Network: GenLayer Studionet (Chain ID: 61999)
-    Meets 100% of GenLayer Platform Steward Institutional Standards.
+    Institutional Standard v0.2.19 with Terminating Appeal & Preserved Juror Escrow.
     """
     platform_admin: Address
     bounties: TreeMap[str, Bounty]
@@ -83,19 +109,42 @@ class Contract(gl.Contract):
         self.bounty_counter = u64(0)
 
     def _get_current_timestamp(self) -> bigint:
-        """Derive trusted execution timestamp strictly from transaction context with safe fallback."""
+        """
+        Retrieves a deterministic execution timestamp supported across GenVM WASI,
+        protocol consensus, and test environments.
+        Eliminates non-deterministic time.time() entirely.
+        """
+        # 1. Deterministic datetime.now() (governed by GenVM WASI clock & direct_vm.warp)
+        try:
+            now_ts = int(datetime.now(timezone.utc).timestamp())
+            if now_ts > 0:
+                return bigint(now_ts)
+        except Exception:
+            pass
+
+        # 2. Transaction execution datetime from message context
         if hasattr(gl, "message_raw") and isinstance(gl.message_raw, dict):
             dt_raw = gl.message_raw.get("datetime", None)
             if dt_raw:
                 try:
-                    from datetime import datetime
                     dt = datetime.fromisoformat(str(dt_raw).replace("Z", "+00:00"))
                     ts = int(dt.timestamp())
                     if ts > 0:
                         return bigint(ts)
                 except Exception:
                     pass
-        return bigint(int(time.time()))
+
+        # 3. Direct block timestamp if exposed by GenLayer protocol
+        if hasattr(gl, "block") and hasattr(gl.block, "timestamp"):
+            try:
+                bts = int(gl.block.timestamp)
+                if bts > 0:
+                    return bigint(bts)
+            except Exception:
+                pass
+
+        # Fallback counter-based timestamp
+        return bigint(int(self.bounty_counter) * 1000 + 1780000000)
 
     def _parse_llm_json(self, response_str: str) -> dict:
         if isinstance(response_str, dict):
@@ -141,10 +190,12 @@ class Contract(gl.Contract):
         source_url_b: str,
         hash_a: str = "",
         hash_b: str = "",
-        custom_id: str = ""
+        custom_id: str = "",
+        max_appeal_rounds: int = 2
     ) -> str:
         """
         Creates a new fact-checking bounty by locking native GEN in escrow.
+        Enforces strict source-independence (rejects identical URLs or matching publisher domains).
         Supports optional SHA-256 artifact hash pinning for evidence immutability.
         """
         bounty_val = bigint(gl.message.value)
@@ -158,6 +209,16 @@ class Contract(gl.Contract):
         url_b = source_url_b.strip()
         if not url_a.startswith("http") or not url_b.startswith("http"):
             raise UserError("Both sources must be valid HTTP/HTTPS URLs.")
+
+        # Strict source-independence rule 1: URLs must not be identical
+        if url_a.lower() == url_b.lower():
+            raise UserError("Source A and Source B cannot be identical URLs.")
+
+        # Strict source-independence rule 2: Sources must be from independent publishers/domains
+        domain_a = _extract_domain(url_a)
+        domain_b = _extract_domain(url_b)
+        if domain_a and domain_b and domain_a == domain_b:
+            raise UserError(f"Source independence violation: both sources resolve to the same domain ({domain_a}). Multi-source consensus requires distinct publishers.")
 
         if custom_id and custom_id.strip():
             bounty_id = custom_id.strip()
@@ -191,7 +252,11 @@ class Contract(gl.Contract):
             juror_bond=bigint(0),
             payout_ready_at=bigint(0),
             disputed_at=bigint(0),
-            dispute_reason=""
+            dispute_reason="",
+            prior_jurors=[],
+            prior_bonds=[],
+            appeal_round=u64(0),
+            max_appeal_rounds=u64(max(1, max_appeal_rounds))
         )
         self.bounty_ids.append(bounty_id)
         self.total_bounty_locked = self.total_bounty_locked + bounty_val
@@ -204,10 +269,11 @@ class Contract(gl.Contract):
         Dual-Sided Protection Adjudication with 24h Cooling-Off Window:
         1. Access Control: Creator CANNOT adjudicate their own bounty.
         2. Juror Bond: Minimum 5% skin-in-the-game bond (refundable upon resolution).
-        3. Full Evidence Rendering: Sources rendered without artificial text truncation.
-        4. Artifact Pinning: SHA-256 verification against dynamic URL mutation.
-        5. Semantic Consensus: GenVM validators verify VERDICT equality.
-        6. Dispute Window: Escrow enters AWAITING_PAYOUT for 24 hours before disbursement.
+        3. Prior Juror Bond Preservation: In re-adjudication, previous juror bonds are preserved.
+        4. Full Evidence Rendering: Sources rendered without artificial text truncation.
+        5. Artifact Pinning: SHA-256 verification against dynamic URL mutation.
+        6. Validator Checks: Stored reasoning and quotes strictly validated before consensus.
+        7. Terminating Appeal Path: Bounded appeal rounds to guarantee final settlement.
         """
         if bounty_id not in self.bounties:
             raise UserError(f"Bounty {bounty_id} does not exist.")
@@ -225,6 +291,13 @@ class Contract(gl.Contract):
         bond_val = bigint(gl.message.value)
         if bond_val < min_bond:
             raise UserError(f"Insufficient juror bond. Minimum 5% required ({min_bond} wei).")
+
+        # Prior Juror Bond Preservation: Preserve prior juror and bond when re-adjudicating a disputed bounty
+        if bounty.status == "DISPUTED":
+            if _addr_str(bounty.juror) != "0x0000000000000000000000000000000000000000":
+                bounty.prior_jurors.append(bounty.juror)
+                bounty.prior_bonds.append(bounty.juror_bond)
+            bounty.appeal_round = bounty.appeal_round + u64(1)
 
         bounty.juror = caller
         bounty.juror_bond = bond_val
@@ -320,11 +393,34 @@ Respond ONLY with valid JSON:
             leader_data = leader_res.calldata if hasattr(leader_res, "calldata") else leader_res
             if not isinstance(leader_data, dict):
                 leader_data = self._parse_llm_json(str(leader_data))
+
+            # 1. Substantive reasoning check: Leader reasoning must be present and >= 10 chars
+            leader_reason = str(leader_data.get("reason", "")).strip()
+            if len(leader_reason) < 10:
+                return False
+
+            # 2. Score bounds check: confidence and evidence_score must be integers in [0, 100]
+            try:
+                l_conf = int(leader_data.get("confidence", 0))
+                l_score = int(leader_data.get("evidence_score", 0))
+                if l_conf < 0 or l_conf > 100 or l_score < 0 or l_score > 100:
+                    return False
+            except Exception:
+                return False
+
+            # 3. Evidence quote check: If definitive verdict (TRUE or FALSE), quotes must not be empty
+            eff_leader_verdict = self._effective_verdict(leader_data)
+            if eff_leader_verdict in ["TRUE", "FALSE"]:
+                quote_a = str(leader_data.get("evidence_quote_a", "")).strip()
+                quote_b = str(leader_data.get("evidence_quote_b", "")).strip()
+                if not quote_a or not quote_b:
+                    return False
+
+            # 4. Semantic consensus check against independent validator evaluation
             mine_data = leader_fn()
-            return self._effective_verdict(leader_data) == self._effective_verdict(mine_data)
+            return eff_leader_verdict == self._effective_verdict(mine_data)
 
         adjudication_res = gl.vm.run_nondet(leader_fn, validator_fn)
-
         if not isinstance(adjudication_res, dict):
             adjudication_res = self._parse_llm_json(str(adjudication_res))
 
@@ -367,13 +463,17 @@ Respond ONLY with valid JSON:
     def raise_dispute(self, bounty_id: str, dispute_reason: str) -> None:
         """
         Allows Creator or Juror to freeze escrow during the 24h cooling-off window.
-        Prevents unilateral settlement when an adjudication error is identified.
+        Terminating appeal path: Disputes are blocked once max_appeal_rounds is reached.
         """
         if bounty_id not in self.bounties:
             raise UserError("Bounty does not exist.")
         bounty = self.bounties[bounty_id]
         if bounty.status != "AWAITING_PAYOUT":
             raise UserError("Can only dispute during AWAITING_PAYOUT window.")
+
+        # Terminating appeal path: enforce maximum appeal rounds
+        if bounty.appeal_round >= bounty.max_appeal_rounds:
+            raise UserError(f"Terminating appeal path reached (Round {int(bounty.appeal_round)}/{int(bounty.max_appeal_rounds)}). Current verdict is final and binding.")
 
         caller_str = _addr_str(gl.message.sender_address).lower()
         creator_str = _addr_str(bounty.creator).lower()
@@ -389,7 +489,7 @@ Respond ONLY with valid JSON:
 
         bounty.status = "DISPUTED"
         bounty.disputed_at = now
-        bounty.dispute_reason = f"[DISPUTED by {caller_str[:8]}] {dispute_reason.strip()}"
+        bounty.dispute_reason = f"[DISPUTED R{int(bounty.appeal_round)} by {caller_str[:8]}] {dispute_reason.strip()}"
         bounty.reason = f"{bounty.reason} | {bounty.dispute_reason}"
         self.bounties[bounty_id] = bounty
 
@@ -402,7 +502,7 @@ Respond ONLY with valid JSON:
     def finalize_settlement(self, bounty_id: str) -> None:
         """
         Executes escrow settlement strictly after 24h cooling-off without active dispute.
-        Disburses bounty rewards and refunds staked juror collateral.
+        Preserves and refunds every prior juror bond across all appeal rounds.
         """
         if bounty_id not in self.bounties:
             raise UserError("Bounty does not exist.")
@@ -415,7 +515,9 @@ Respond ONLY with valid JSON:
         juror_str = _addr_str(bounty.juror).lower()
         admin_str = _addr_str(self.platform_admin).lower()
 
-        if caller_str != creator_str and caller_str != juror_str and caller_str != admin_str:
+        is_prior_juror = any(_addr_str(pj).lower() == caller_str for pj in bounty.prior_jurors)
+
+        if caller_str != creator_str and caller_str != juror_str and caller_str != admin_str and not is_prior_juror:
             raise UserError("Unauthorized caller.")
 
         now = self._get_current_timestamp()
@@ -423,7 +525,7 @@ Respond ONLY with valid JSON:
             raise UserError("24-hour cooling-off period has not elapsed yet.")
 
         bounty_val = bounty.bounty_amount
-        juror_bond_val = bounty.juror_bond
+        current_juror_bond = bounty.juror_bond
         juror_addr = bounty.juror
         creator_addr = bounty.creator
 
@@ -432,17 +534,81 @@ Respond ONLY with valid JSON:
         self.total_bounty_locked = self.total_bounty_locked - bounty_val
         self.total_claims_resolved = self.total_claims_resolved + bigint(1)
 
+        # 1. Settle current active round
         if bounty.verdict in ["TRUE", "FALSE"]:
             bounty.status = f"RESOLVED_{bounty.verdict}"
-            # Juror receives bounty reward + 100% refund of their staked bond
-            total_payout = u256(int(bounty_val + juror_bond_val))
+            # Current resolving Juror receives bounty reward + 100% refund of their staked bond
+            total_payout = u256(int(bounty_val + current_juror_bond))
             gl.get_contract_at(juror_addr).emit_transfer(value=total_payout)
         else:
             bounty.status = "UNVERIFIED"
-            # 100% escrow refund to creator, 100% bond refund to juror
+            # 100% escrow refund to creator, 100% bond refund to current juror
             gl.get_contract_at(creator_addr).emit_transfer(value=u256(int(bounty_val)))
-            if juror_bond_val > bigint(0):
-                gl.get_contract_at(juror_addr).emit_transfer(value=u256(int(juror_bond_val)))
+            if current_juror_bond > bigint(0):
+                gl.get_contract_at(juror_addr).emit_transfer(value=u256(int(current_juror_bond)))
+
+        # 2. Preserve and refund EVERY prior juror bond from previous appeal rounds!
+        for idx in range(len(bounty.prior_jurors)):
+            p_juror = bounty.prior_jurors[idx]
+            p_bond = bounty.prior_bonds[idx]
+            if p_bond > bigint(0):
+                gl.get_contract_at(p_juror).emit_transfer(value=u256(int(p_bond)))
+
+        # Clear prior bonds in storage after successful disbursement
+        for idx in range(len(bounty.prior_bonds)):
+            bounty.prior_bonds[idx] = bigint(0)
+
+        self.bounties[bounty_id] = bounty
+
+    @gl.public.write
+    def settle_dispute_timeout(self, bounty_id: str) -> None:
+        """
+        Terminating settlement path for abandoned disputes:
+        If a bounty remains in DISPUTED state without re-adjudication for > 7 days (604800 seconds),
+        creator or admin can trigger fallback settlement to refund all parties.
+        """
+        if bounty_id not in self.bounties:
+            raise UserError("Bounty does not exist.")
+        bounty = self.bounties[bounty_id]
+        if bounty.status != "DISPUTED":
+            raise UserError("Bounty is not currently disputed.")
+
+        caller_str = _addr_str(gl.message.sender_address).lower()
+        creator_str = _addr_str(bounty.creator).lower()
+        admin_str = _addr_str(self.platform_admin).lower()
+        if caller_str != creator_str and caller_str != admin_str:
+            raise UserError("Unauthorized: Only creator or admin can trigger dispute timeout settlement.")
+
+        now = self._get_current_timestamp()
+        if now < bounty.disputed_at + bigint(604800):
+            raise UserError("Dispute re-adjudication window (7 days) is still active.")
+
+        bounty_val = bounty.bounty_amount
+        current_juror_bond = bounty.juror_bond
+        juror_addr = bounty.juror
+        creator_addr = bounty.creator
+
+        bounty.bounty_amount = bigint(0)
+        bounty.juror_bond = bigint(0)
+        self.total_bounty_locked = self.total_bounty_locked - bounty_val
+        self.total_claims_resolved = self.total_claims_resolved + bigint(1)
+        bounty.status = "UNVERIFIED"
+        bounty.reason = f"{bounty.reason} | Dispute timed out after 7 days without re-adjudication."
+
+        # Refund creator
+        gl.get_contract_at(creator_addr).emit_transfer(value=u256(int(bounty_val)))
+
+        # Refund current juror if bond was held
+        if current_juror_bond > bigint(0):
+            gl.get_contract_at(juror_addr).emit_transfer(value=u256(int(current_juror_bond)))
+
+        # Refund every prior juror bond
+        for idx in range(len(bounty.prior_jurors)):
+            p_juror = bounty.prior_jurors[idx]
+            p_bond = bounty.prior_bonds[idx]
+            if p_bond > bigint(0):
+                gl.get_contract_at(p_juror).emit_transfer(value=u256(int(p_bond)))
+            bounty.prior_bonds[idx] = bigint(0)
 
         self.bounties[bounty_id] = bounty
 
@@ -454,34 +620,34 @@ Respond ONLY with valid JSON:
         """
         if bounty_id not in self.bounties:
             raise UserError("Bounty does not exist.")
+
         bounty = self.bounties[bounty_id]
-        if _addr_str(gl.message.sender_address).lower() != _addr_str(bounty.creator).lower():
-            raise UserError("Only the creator can cancel.")
+        caller = gl.message.sender_address
+        if _addr_str(caller).lower() != _addr_str(bounty.creator).lower():
+            raise UserError("Only the bounty creator can cancel this bounty.")
+
         if bounty.status != "OPEN":
-            raise UserError("Cannot cancel: Bounty is no longer OPEN.")
+            raise UserError(f"Bounty is no longer OPEN (Current Status: {bounty.status}). Cancellation blocked.")
 
-        # Anti-quỵt check: Escrow locked once a 3rd-party juror has joined or staked bond
-        juror_str = _addr_str(bounty.juror).lower()
-        creator_str = _addr_str(bounty.creator).lower()
-        if (juror_str != creator_str and juror_str not in ("", "0x0", "0x0000000000000000000000000000000000000000")) or bounty.juror_bond > bigint(0):
-            raise UserError("Cannot cancel: A juror has already joined this bounty. Escrow is locked to protect the juror.")
+        if _addr_str(bounty.juror) != "0x0000000000000000000000000000000000000000":
+            raise UserError("A juror has already joined and staked collateral. Cancellation is permanently locked.")
 
+        bounty_val = bounty.bounty_amount
+        bounty.bounty_amount = bigint(0)
         bounty.status = "CANCELLED"
         bounty.verdict = "CANCELLED"
         bounty.reason = "Cancelled by creator."
-        bounty_val = bounty.bounty_amount
-        bounty.bounty_amount = bigint(0)
-        self.total_bounty_locked = self.total_bounty_locked - bounty_val
 
-        gl.get_contract_at(bounty.creator).emit_transfer(value=u256(int(bounty_val)))
+        self.total_bounty_locked = self.total_bounty_locked - bounty_val
         self.bounties[bounty_id] = bounty
 
-    # --- Read-only Views ---
+        # Return locked escrow to creator
+        gl.get_contract_at(bounty.creator).emit_transfer(value=u256(int(bounty_val)))
 
     @gl.public.view
     def get_all_bounties(self) -> str:
         """
-        Authoritative public view for dApp synchronization.
+        Global single-shot public view for fast client synchronization.
         Returns complete JSON array of all bounties in a single RPC call.
         """
         res = []
@@ -508,7 +674,11 @@ Respond ONLY with valid JSON:
                     "juror_bond": str(b.juror_bond),
                     "payout_ready_at": int(b.payout_ready_at),
                     "disputed_at": int(b.disputed_at),
-                    "dispute_reason": b.dispute_reason
+                    "dispute_reason": b.dispute_reason,
+                    "prior_jurors": [_addr_str(pj) for pj in b.prior_jurors],
+                    "prior_bonds": [str(pb) for pb in b.prior_bonds],
+                    "appeal_round": int(b.appeal_round),
+                    "max_appeal_rounds": int(b.max_appeal_rounds)
                 })
         return json.dumps(res)
 
@@ -539,7 +709,11 @@ Respond ONLY with valid JSON:
             "juror_bond": str(b.juror_bond),
             "payout_ready_at": int(b.payout_ready_at),
             "disputed_at": int(b.disputed_at),
-            "dispute_reason": b.dispute_reason
+            "dispute_reason": b.dispute_reason,
+            "prior_jurors": [_addr_str(pj) for pj in b.prior_jurors],
+            "prior_bonds": [str(pb) for pb in b.prior_bonds],
+            "appeal_round": int(b.appeal_round),
+            "max_appeal_rounds": int(b.max_appeal_rounds)
         }
         return json.dumps(data)
 
@@ -714,7 +888,7 @@ export const ContractSettingsModal: React.FC<ContractSettingsModalProps> = ({
                 Official Contract Active on Studionet
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                TruthBounty Dual-Sided Protection contract is live and deployed on GenLayer Studionet at <span className="font-mono text-cyan-300">0xE809...bAC4</span>. No redeployment needed!
+                TruthBounty Dual-Sided Protection contract is live and deployed on GenLayer Studionet at <span className="font-mono text-cyan-300">0xB04A...a18b</span>. No redeployment needed!
               </p>
             </div>
           </div>

@@ -67,3 +67,9 @@ def sim_install_mocks(request):
         return False
 
     return _install
+
+
+@pytest.fixture
+def direct_charlie():
+    """Third independent address for multi-juror appeal testing."""
+    return b"\x99\x88\x77\x66\x55\x44\x33\x22\x11\x00\xaa\xbb\xcc\xdd\xee\xff\x12\x34\x56\x78"

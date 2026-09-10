@@ -241,6 +241,28 @@ export const JuryAudit: React.FC<JuryAuditProps> = ({
                 <span className="font-bold">Dispute / Appeal Recorded:</span> {bounty.dispute_reason}
               </div>
             )}
+
+            {/* Terminating Appeal System & Prior Juror Bonds */}
+            {Boolean(bounty.appeal_round && Number(bounty.appeal_round) > 0) && (
+              <div className="p-2 rounded-lg bg-purple-950/40 border border-purple-800/40 text-purple-200 text-[11px] flex items-center justify-between">
+                <span className="font-bold">Terminating Appeal System:</span>
+                <span className="font-mono">Round {Number(bounty.appeal_round)} / {Number(bounty.max_appeal_rounds || 2)}</span>
+              </div>
+            )}
+
+            {bounty.prior_jurors && bounty.prior_jurors.length > 0 && (
+              <div className="p-2.5 rounded-lg bg-purple-950/50 border border-purple-700/50 text-purple-200 text-[11px] space-y-1">
+                <span className="font-bold block text-purple-300">Preserved Prior Juror Bonds (100% Refund Guaranteed):</span>
+                <div className="space-y-1 font-mono text-[10px] text-purple-200">
+                  {bounty.prior_jurors.map((pj, idx) => (
+                    <div key={idx} className="flex items-center justify-between bg-purple-900/30 p-1 rounded">
+                      <span>Prior Juror #{idx + 1}: {pj.slice(0, 8)}...{pj.slice(-6)}</span>
+                      <span>Bond: {bounty.prior_bonds?.[idx] ? formatGenAmount(bounty.prior_bonds[idx]) : '0'} GEN</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Consensus Metrics */}

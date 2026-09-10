@@ -68,8 +68,33 @@ export const CreateClaim: React.FC<CreateClaimProps> = ({
       return;
     }
 
-    if (!sourceUrlA.trim().startsWith('http') || !sourceUrlB.trim().startsWith('http')) {
+    const urlA = sourceUrlA.trim();
+    const urlB = sourceUrlB.trim();
+
+    if (!urlA.startsWith('http') || !urlB.startsWith('http')) {
       setError('Both Source A and Source B must be valid HTTP/HTTPS URLs.');
+      return;
+    }
+
+    if (urlA.toLowerCase() === urlB.toLowerCase()) {
+      setError('Source A and Source B cannot be identical URLs.');
+      return;
+    }
+
+    const extractDomain = (u: string) => {
+      try {
+        let h = new URL(u).hostname.toLowerCase();
+        if (h.startsWith('www.')) h = h.substring(4);
+        return h;
+      } catch {
+        return '';
+      }
+    };
+
+    const domA = extractDomain(urlA);
+    const domB = extractDomain(urlB);
+    if (domA && domB && domA === domB) {
+      setError(`Source independence violation: Both sources resolve to the same publisher/domain (${domA}). GenLayer multi-source consensus requires independent sources from distinct publishers.`);
       return;
     }
 
