@@ -96,31 +96,24 @@ class Contract(gl.Contract):
 
     def _get_current_timestamp(self) -> bigint:
         """
-        Retrieves a deterministic execution timestamp supported across GenVM WASI,
-        protocol consensus, and test environments.
-        Eliminates non-deterministic time.time() entirely.
+        Derive trusted, deterministic execution timestamp strictly from transaction context.
+        Fail-closed: raises UserError if valid timestamp cannot be established.
         """
-        # 1. Deterministic datetime.now() (governed by GenVM WASI clock & direct_vm.warp)
-        try:
-            now_ts = int(datetime.now(timezone.utc).timestamp())
-            if now_ts > 0:
-                return bigint(now_ts)
-        except Exception:
-            pass
-
-        # 2. Transaction execution datetime from message context
+        # 1. Authoritative transaction execution datetime from message context
         if hasattr(gl, "message_raw") and isinstance(gl.message_raw, dict):
             dt_raw = gl.message_raw.get("datetime", None)
             if dt_raw:
                 try:
-                    dt = datetime.fromisoformat(str(dt_raw).replace("Z", "+00:00"))
-                    ts = int(dt.timestamp())
+                    s = str(dt_raw)
+                    if s.endswith("Z"):
+                        s = s[:-1] + "+00:00"
+                    ts = int(datetime.fromisoformat(s).timestamp())
                     if ts > 0:
                         return bigint(ts)
                 except Exception:
                     pass
 
-        # 3. Direct block timestamp if exposed by GenLayer protocol
+        # 2. Block timestamp from GenLayer consensus
         if hasattr(gl, "block") and hasattr(gl.block, "timestamp"):
             try:
                 bts = int(gl.block.timestamp)
@@ -129,8 +122,15 @@ class Contract(gl.Contract):
             except Exception:
                 pass
 
-        # Fallback counter-based timestamp
-        return bigint(int(self.bounty_counter) * 1000 + 1780000000)
+        # 3. WASI deterministic clock fallback
+        try:
+            now_ts = int(datetime.now(timezone.utc).timestamp())
+            if now_ts > 0:
+                return bigint(now_ts)
+        except Exception:
+            pass
+
+        raise UserError("Trusted deterministic timestamp unavailable from execution context.")
 
     def _parse_llm_json(self, response_str: str) -> dict:
         if isinstance(response_str, dict):

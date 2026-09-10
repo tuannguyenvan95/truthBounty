@@ -73,3 +73,21 @@ def sim_install_mocks(request):
 def direct_charlie():
     """Third independent address for multi-juror appeal testing."""
     return b"\x99\x88\x77\x66\x55\x44\x33\x22\x11\x00\xaa\xbb\xcc\xdd\xee\xff\x12\x34\x56\x78"
+
+
+@pytest.fixture(autouse=True)
+def sync_direct_vm_warp(direct_vm):
+    """
+    Ensure direct_vm.warp also synchronizes gl.message_raw['datetime']
+    so contracts prioritizing authoritative gl.message_raw['datetime']
+    receive the exact warped timestamp.
+    """
+    orig_warp = direct_vm.warp
+    def _wrapped_warp(timestamp: str) -> None:
+        orig_warp(timestamp)
+        import sys
+        if 'genlayer.gl' in sys.modules:
+            gl = sys.modules['genlayer.gl']
+            if hasattr(gl, 'message_raw') and isinstance(gl.message_raw, dict):
+                gl.message_raw['datetime'] = timestamp
+    direct_vm.warp = _wrapped_warp
