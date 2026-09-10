@@ -7,11 +7,12 @@ export const STUDIONET_RPC_URL = 'https://studio.genlayer.com/api';
 export const STUDIONET_EXPLORER_URL = 'https://studio.genlayer.com';
 
 // Official deployed TruthBounty contract on GenLayer Studionet (v0.2.19 - Fail-Closed Deterministic Timestamp & Terminating Appeal)
-export const OFFICIAL_CONTRACT_ADDRESS: `0x${string}` = '0x43cFc84BB511c9A8F20fBEE1d7EcE8583a724E4d';
+export const OFFICIAL_CONTRACT_ADDRESS: `0x${string}` = '0x3Dd4aB13b86813361Dc95cE63A5Ef0Fe0a2a349f';
 
 export const STORAGE_KEY_CONTRACT_ADDRESS = 'truthbounty_contract_address';
 
 const LEGACY_CONTRACT_ADDRESSES = [
+  '0x43cfc84bb511c9a8f20fbee1d7ece8583a724e4d',
   '0xb04ac41959183c59342e2da0e02f4a7ad51ca18b',
   '0x874ff0f175cba6a6040dd97a174f1968e378988f',
   '0xe8098316a21a3aa74590371ec7da3f23c77ebac4',
